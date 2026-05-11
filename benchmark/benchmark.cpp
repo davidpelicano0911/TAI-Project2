@@ -112,8 +112,9 @@ static std::vector<Compressor> make_compressors(const std::string& /*tmp*/) {
         { "zstd-9",  "zstd -9  -q -f {src} -o {dst}", "zstd -dq -f {src} -o {dst}", ".zst" },
         { "zstd-19", "zstd -19 -q -f {src} -o {dst}", "zstd -dq -f {src} -o {dst}", ".zst" },
 
-        // --- our compressor ---
+        // --- our compressors ---
         { "rais",    "../rais/compress {src} {dst} 2>/dev/null",   "../rais/decompress {src} {dst}", ".rais" },
+        { "astra",   "../astra/compress {src} {dst} 2>/dev/null",  "../astra/decompress {src} {dst}", ".astr" },
     };
 }
 

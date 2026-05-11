@@ -141,7 +141,8 @@ The residuals' 16-bit values are **split into high byte and low byte**, each cod
 Offset  Size   Field
 ------  ----   -----
 0       4      Magic bytes: "RAIS"
-4       2      Version (= 1), little-endian
+4       2      Version (
+= 1), little-endian
 6       4      Width  in pixels, little-endian
 10      4      Height in pixels, little-endian
 14      4      Number of streams (= 2), little-endian
