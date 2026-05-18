@@ -37,6 +37,7 @@ FAMILY_COLORS = {
     "zstd":  "#16a34a",
     "rais":  "#e11d48",
     "astra": "#f59e0b",
+    "hais":  "#0d9488",
 }
 
 def family(name):
