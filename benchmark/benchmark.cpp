@@ -115,6 +115,7 @@ static std::vector<Compressor> make_compressors(const std::string& /*tmp*/) {
         // --- our compressors ---
         { "rais",    "../rais/compress {src} {dst} 2>/dev/null",   "../rais/decompress {src} {dst}", ".rais" },
         { "astra",   "../astra/compress {src} {dst} 2>/dev/null",  "../astra/decompress {src} {dst}", ".astr" },
+        { "helix",   "../helix/compress {src} {dst} 2>/dev/null",  "../helix/decompress {src} {dst}", ".hlx" },
     };
 }
 
