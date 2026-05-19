@@ -1,12 +1,37 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
 TARGET   = benchmark
+DATA_DIR ?= ../data2
+TMP_DIR  ?= /tmp/tai_bench
+CSV      ?= results.csv
+BENCHMARK_TOOLS = gzip bzip2 xz zstd
+
+.PHONY: all run csv benchmark-run current check-tools plot clean
+
+all: $(TARGET)
 
 $(TARGET): benchmark.cpp
 	$(CXX) $(CXXFLAGS) benchmark.cpp -o $(TARGET)
 
-run: $(TARGET)
-	./$(TARGET) ../data2 -o results.csv
+current:
+	$(MAKE) -C ../rais
+	$(MAKE) -C ../astra
+
+check-tools:
+	@missing=0; \
+	for tool in $(BENCHMARK_TOOLS); do \
+		if ! command -v $$tool >/dev/null 2>&1; then \
+			echo "Missing benchmark tool: $$tool"; \
+			missing=1; \
+		fi; \
+	done; \
+	exit $$missing
+
+run csv benchmark-run: $(TARGET) current check-tools
+	./$(TARGET) $(DATA_DIR) $(TMP_DIR) -o $(CSV)
+
+plot: $(CSV)
+	python3 plot.py $(CSV)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(CSV) results_plot.png

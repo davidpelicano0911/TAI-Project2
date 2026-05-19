@@ -249,7 +249,11 @@ static int compress(const char* in_path, const char* out_path) {
         return 1;
     }
 
-    // Read raw big-endian uint16
+    // Model input domain:
+    // The dataset is a fixed-size 1500x1500 raw image with one big-endian
+    // uint16 sample per pixel. We first recover the actual numeric pixel values
+    // so the following model can use 2-D neighbourhood relationships instead of
+    // treating the file as an unstructured byte stream.
     std::vector<uint16_t> pixels(npix);
     for (int i = 0; i < npix; i++) {
         uint8_t b[2]; fread(b, 1, 2, fin);
@@ -257,7 +261,21 @@ static int compress(const char* in_path, const char* out_path) {
     }
     fclose(fin);
 
-    // --- Predict + zigzag ---
+    // Spatial model:
+    // Predict each pixel from already-known neighbours using MED/JPEG-LS:
+    // left, above, and above-left. Smooth image regions then produce residuals
+    // near zero, which are much cheaper to entropy-code than absolute pixels.
+    //
+    // Symbol model:
+    // Residuals are signed, so zigzag maps them to unsigned values while keeping
+    // small magnitudes close to zero:
+    //   0 -> 0, -1 -> 1, +1 -> 2, -2 -> 3, ...
+    //
+    // Byte-stream model:
+    // The 16-bit zigzag value is split into high and low bytes. The high byte
+    // mostly represents residual magnitude and is very skewed; the low byte has
+    // a different distribution. Coding them separately gives each stream its own
+    // probability model.
     std::vector<uint8_t> hi(npix), lo(npix);
     for (int i = 0; i < npix; i++) {
         int x = i % width, y = i / width;
@@ -270,7 +288,11 @@ static int compress(const char* in_path, const char* out_path) {
         lo[i] = (uint8_t)(zz & 0xFF);
     }
 
-    // --- Build frequency tables ---
+    // Static entropy model:
+    // Count symbol frequencies for the high-byte and low-byte streams
+    // independently, then normalise each histogram to the rANS table size
+    // RANS_SCALE. These normalised frequencies are the probability model stored
+    // in the compressed file, making decompression independent of the original.
     uint64_t cnt_hi[256] = {}, cnt_lo[256] = {};
     for (int i = 0; i < npix; i++) { cnt_hi[hi[i]]++; cnt_lo[lo[i]]++; }
 
@@ -280,14 +302,20 @@ static int compress(const char* in_path, const char* out_path) {
     tab_hi.build_cumul(); tab_hi.build_lookup();
     tab_lo.build_cumul(); tab_lo.build_lookup();
 
-    // --- Encode (symbols must be fed in REVERSE order for rANS) ---
+    // Entropy coding:
+    // rANS encodes a symbol using its frequency and cumulative range in the
+    // static model. The decoder emits symbols in forward order, so the encoder
+    // must feed the source symbols in reverse order.
     RansEncoder enc_hi, enc_lo;
     for (int i = npix - 1; i >= 0; i--) enc_hi.encode(hi[i], tab_hi);
     for (int i = npix - 1; i >= 0; i--) enc_lo.encode(lo[i], tab_lo);
     enc_hi.flush();
     enc_lo.flush();
 
-    // --- Write output ---
+    // Container model:
+    // Store image dimensions, the two static probability tables, and the two
+    // rANS payloads. No side information from the original image is needed:
+    // decompression rebuilds the same predictor context while scanning pixels.
     FILE* fout = fopen(out_path, "wb");
     if (!fout) { fprintf(stderr, "Cannot open output: %s\n", out_path); return 1; }
 

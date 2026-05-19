@@ -1,3 +1,5 @@
+<<<<<<< HEAD
+=======
 compressor,file,orig_bytes,comp_bytes,ratio,bpp,compress_ms,decompress_ms,lossless
 gzip-1,A,4500000,3341579,0.742573,5.940585,196.321,87.207,true
 gzip-1,B,4500000,2482372,0.551638,4.413106,138.361,74.780,true
