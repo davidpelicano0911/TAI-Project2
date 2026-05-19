@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -312,6 +313,7 @@ int main(int argc, char* argv[]) {
     if (!csv_path.empty()) {
         csv = fopen(csv_path.c_str(), "w");
         if (!csv) { fprintf(stderr, "Cannot open %s for writing\n", csv_path.c_str()); return 1; }
+        fcntl(fileno(csv), F_SETFD, FD_CLOEXEC);
         fprintf(csv, "compressor,file,orig_bytes,comp_bytes,ratio,bpp,compress_ms,decompress_ms,lossless\n");
     }
 

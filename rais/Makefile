@@ -1,13 +1,16 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -O3 -march=native -Wall -Wextra
 
-all: compress decompress
+all: compress decompress coder_compare
 
 compress: compress.cpp
 	$(CXX) $(CXXFLAGS) compress.cpp -o compress
 
 decompress: decompress.cpp
 	$(CXX) $(CXXFLAGS) decompress.cpp -o decompress
+
+coder_compare: coder_compare.cpp
+	$(CXX) $(CXXFLAGS) coder_compare.cpp -o coder_compare
 
 test: compress decompress
 	@echo "--- Compressing all data files ---"
@@ -30,4 +33,4 @@ test: compress decompress
 	echo ""; echo "Passed: $$ok  Failed: $$fail"
 
 clean:
-	rm -f compress decompress
+	rm -f compress decompress coder_compare
