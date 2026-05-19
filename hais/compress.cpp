@@ -1,296 +1,398 @@
-// HAIS — Hybrid Astronomical Image compressor
+// HAIS — Hybrid Astronomical Image compressor  (version 4)
 //
 // Pipeline por bloco 150×150:
-//   1. Gerar símbolos com 3 modos: raw / left / MED
-//   2. Escolher modo com menor entropia
-//   3. Comprimir com ANS (rANS com split hi8+lo8)
+//   1. Gerar símbolos com 3 modos: raw / MED / avg
+//   2. Escolher modo com menor byte_cost (H(hi8)+H(lo8))
+//   3. Comprimir com FSE/tANS (split hi8+lo8)
 //
-// Formato do bloco:
-//   [1]      modo (0=raw, 1=left, 2=MED)
-//   [256*4]  tabela freq hi8
-//   [8]      tamanho stream hi8
-//   [N]      stream hi8
-//   [256*4]  tabela freq lo8
-//   [8]      tamanho stream lo8
-//   [M]      stream lo8
-//
-// Usage: ./compress <input> <output.hais>
+// Usage: ./compress <input> <output.hais> [width height]
+//        Default width=1500 height=1500 (backward compatible with benchmark)
 
 #include <cstdio>
 #include <cstdint>
-#include <cstring>
 #include <cmath>
+#include <cstdlib>
 #include <vector>
 #include <algorithm>
 #include <thread>
 #include <atomic>
+#include <cstring>
 
-static constexpr int     WIDTH      = 1500;
-static constexpr int     HEIGHT     = 1500;
-static constexpr int     BLOCK_SIZE = 150;
-static constexpr int     BLOCKS_X   = WIDTH  / BLOCK_SIZE;
-static constexpr int     BLOCKS_Y   = HEIGHT / BLOCK_SIZE;
-static constexpr int     BLOCK_NPIX = BLOCK_SIZE * BLOCK_SIZE;
-
-static constexpr uint8_t  MAGIC[4] = {'H','A','I','S'};
-static constexpr uint16_t VERSION  = 1;
+static constexpr uint8_t  MAGIC[4]   = {'H','A','I','S'};
+static constexpr uint32_t SCALE_BITS = 16;
+static constexpr uint32_t SCALE      = 1u << SCALE_BITS;
+static constexpr int      BLOCK_SIZE = 150;
 
 // ---------------------------------------------------------------------------
-// rANS (ANS com emissão de bytes)
+// FSE / tANS
 // ---------------------------------------------------------------------------
 
-static constexpr uint32_t RANS_SCALE_BITS = 16;
-static constexpr uint32_t RANS_SCALE      = 1u << RANS_SCALE_BITS;
-static constexpr uint32_t RANS_L          = 1u << 23;
+struct FseDecodeEntry {
+    uint8_t  sym;
+    uint8_t  nb_bits;
+    uint16_t base;
+};
 
-struct RansTable {
+struct FseEncodeRange {
+    uint16_t base;
+    uint16_t state;
+    uint8_t  nb_bits;
+};
+
+struct FseTable {
     uint32_t freq[256];
-    uint32_t cumul[257];
+    std::vector<FseDecodeEntry> dec;
+    std::vector<FseEncodeRange> enc[256];
 
-    void build_cumul() {
-        cumul[0] = 0;
-        for (int i = 0; i < 256; i++) cumul[i+1] = cumul[i] + freq[i];
+    void build() {
+        dec.assign(SCALE, {});
+        for (int i = 0; i < 256; i++) enc[i].clear();
+
+        uint32_t pos = 0;
+        const uint32_t step = (SCALE >> 1) + (SCALE >> 3) + 3;
+        std::vector<uint8_t> spread(SCALE);
+        for (int s = 0; s < 256; s++) {
+            for (uint32_t n = 0; n < freq[s]; n++) {
+                spread[pos] = (uint8_t)s;
+                pos = (pos + step) & (SCALE - 1);
+            }
+        }
+
+        uint32_t next[256];
+        for (int s = 0; s < 256; s++) {
+            next[s] = freq[s];
+            enc[s].reserve(freq[s]);
+        }
+
+        for (uint32_t state = 0; state < SCALE; state++) {
+            uint8_t sym = spread[state];
+            uint32_t x = next[sym]++;
+            uint8_t nb = (uint8_t)(SCALE_BITS - (31u - __builtin_clz(x)));
+            uint32_t base = (x << nb) - SCALE;
+
+            dec[state] = {sym, nb, (uint16_t)base};
+            enc[sym].push_back({(uint16_t)base, (uint16_t)state, nb});
+        }
+
+        for (int s = 0; s < 256; s++) {
+            std::sort(enc[s].begin(), enc[s].end(),
+                      [](const FseEncodeRange& a, const FseEncodeRange& b) {
+                          return a.base < b.base;
+                      });
+        }
     }
 };
 
-static void normalise_freqs(const uint64_t* counts, uint32_t* freq) {
+static void fit_freqs(const uint64_t* cnt, uint32_t* freq) {
     uint64_t total = 0;
-    for (int i = 0; i < 256; i++) total += counts[i];
-
-    uint32_t assigned = 0;
+    for (int i = 0; i < 256; i++) total += cnt[i];
+    uint32_t used = 0;
     for (int i = 0; i < 256; i++) {
-        if (counts[i] == 0) { freq[i] = 0; continue; }
-        freq[i] = (uint32_t)std::max((uint64_t)1,
-                    (counts[i] * (uint64_t)RANS_SCALE) / total);
-        assigned += freq[i];
+        if (!cnt[i]) { freq[i] = 0; continue; }
+        freq[i] = (uint32_t)std::max((uint64_t)1, cnt[i] * (uint64_t)SCALE / total);
+        used += freq[i];
     }
-    int best = 0;
-    for (int i = 1; i < 256; i++)
-        if (counts[i] > counts[best]) best = i;
-    if (assigned < RANS_SCALE)      freq[best] += RANS_SCALE - assigned;
-    else if (assigned > RANS_SCALE) freq[best] -= assigned - RANS_SCALE;
+    int peak = 0;
+    for (int i = 1; i < 256; i++) if (cnt[i] > cnt[peak]) peak = i;
+    if (used < SCALE) freq[peak] += SCALE - used;
+    else              freq[peak] -= used - SCALE;
 }
 
-struct RansEncoder {
-    uint32_t state = RANS_L;
-    std::vector<uint8_t> buf;
+struct BitWriter {
+    struct Op {
+        uint16_t bits;
+        uint8_t  nbits;
+    };
 
-    void encode(uint8_t sym, const RansTable& tab) {
-        uint32_t f = tab.freq[sym];
-        uint32_t c = tab.cumul[sym];
-        uint32_t x_max = ((RANS_L / RANS_SCALE) * 256) * f;
-        while (state >= x_max) { buf.push_back(state & 0xFF); state >>= 8; }
-        state = (state / f) * RANS_SCALE + c + (state % f);
+    std::vector<Op> ops;
+    std::vector<uint8_t> bytes;
+
+    void put(uint32_t bits, int n) {
+        ops.push_back({(uint16_t)bits, (uint8_t)n});
     }
 
-    void flush() {
-        buf.push_back( state        & 0xFF);
-        buf.push_back((state >>  8) & 0xFF);
-        buf.push_back((state >> 16) & 0xFF);
-        buf.push_back((state >> 24) & 0xFF);
-        std::reverse(buf.begin(), buf.end());
+    void flush_reverse() {
+        uint64_t bitbuf = 0;
+        int bitcnt = 0;
+        for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
+            bitbuf |= (uint64_t)it->bits << bitcnt;
+            bitcnt += it->nbits;
+            while (bitcnt >= 8) {
+                bytes.push_back((uint8_t)(bitbuf & 0xFF));
+                bitbuf >>= 8;
+                bitcnt -= 8;
+            }
+        }
+        if (bitcnt > 0) bytes.push_back((uint8_t)(bitbuf & 0xFF));
+    }
+};
+
+struct FseEncoder {
+    uint16_t state = 0;
+    BitWriter bw;
+
+    void push(uint8_t sym, const FseTable& t) {
+        const auto& ranges = t.enc[sym];
+        auto it = std::upper_bound(
+            ranges.begin(), ranges.end(), state,
+            [](uint16_t value, const FseEncodeRange& r) { return value < r.base; });
+        --it;
+
+        bw.put(state - it->base, it->nb_bits);
+        state = it->state;
+    }
+
+    void finish(std::vector<uint8_t>& out) {
+        bw.flush_reverse();
+        out.push_back((uint8_t)(state & 0xFF));
+        out.push_back((uint8_t)(state >> 8));
+        out.insert(out.end(), bw.bytes.begin(), bw.bytes.end());
     }
 };
 
 // ---------------------------------------------------------------------------
-// I/O helpers
+// Buffer / file helpers
 // ---------------------------------------------------------------------------
 
-static void write_u8   (FILE* f, uint8_t  v) { fwrite(&v, 1, 1, f); }
-static void write_u16le(FILE* f, uint16_t v) {
-    uint8_t b[2] = {(uint8_t)(v & 0xFF), (uint8_t)(v >> 8)};
-    fwrite(b, 1, 2, f);
+static void bput8  (std::vector<uint8_t>& b, uint8_t  v) { b.push_back(v); }
+static void bput32 (std::vector<uint8_t>& b, uint32_t v) {
+    for (int i = 0; i < 4; i++) { b.push_back(v & 0xFF); v >>= 8; }
 }
+static void bput64 (std::vector<uint8_t>& b, uint64_t v) {
+    for (int i = 0; i < 8; i++) { b.push_back(v & 0xFF); v >>= 8; }
+}
+static void write_u8   (FILE* f, uint8_t  v) { fwrite(&v, 1, 1, f); }
 static void write_u32le(FILE* f, uint32_t v) {
     uint8_t b[4]; for (int i = 0; i < 4; i++) { b[i] = v & 0xFF; v >>= 8; }
     fwrite(b, 1, 4, f);
 }
 
 // ---------------------------------------------------------------------------
-// Zigzag (usa int16 — residuos fora de [-32768,32767] são raros e só ocorrem
-// em blocos onde mode 0 vence, logo nunca chegam à codificação)
+// Encode a byte stream into buf: [table][stream_size][final_state+bits]
+//
+// Table format:
+//   0x00          dense: 256 × uint32
+//   0x01..0xFE    sparse: nnz × (uint8 sym + uint32 freq)
+//   0xFF          implicit uniform (freq[i]=SCALE/256 for all i) - no table bytes
+//                 used when nnz==256: saves 1024 bytes with no compression loss
+//                 for nearly-uniform distributions (CCD readout noise)
+// ---------------------------------------------------------------------------
+
+static void encode_stream(std::vector<uint8_t>& buf, const std::vector<uint8_t>& bytes) {
+    uint64_t cnt[256] = {};
+    for (uint8_t b : bytes) cnt[b]++;
+
+    int nnz = 0;
+    for (int i = 0; i < 256; i++) if (cnt[i]) nnz++;
+
+    FseTable tab;
+    if (nnz == 256) {
+        for (int i = 0; i < 256; i++) tab.freq[i] = SCALE / 256;
+        tab.build();
+        bput8(buf, 0xFF);
+    } else {
+        fit_freqs(cnt, tab.freq);
+        tab.build();
+        // 0xFF is reserved for implicit-uniform; 0x00 for dense.
+        // Sparse flag range is 0x01..0xFE (nnz 1..254).
+        // nnz == 255 must use dense to avoid the 0xFF collision.
+        if (nnz <= 254) {                 // sparse
+            bput8(buf, (uint8_t)nnz);
+            for (int i = 0; i < 256; i++) {
+                if (!tab.freq[i]) continue;
+                bput8(buf, (uint8_t)i);
+                bput32(buf, tab.freq[i]);
+            }
+        } else {                          // dense (nnz == 255)
+            bput8(buf, 0);
+            for (int i = 0; i < 256; i++) bput32(buf, tab.freq[i]);
+        }
+    }
+
+    FseEncoder enc;
+    std::vector<uint8_t> stream;
+    for (int i = (int)bytes.size() - 1; i >= 0; i--) enc.push(bytes[i], tab);
+    enc.finish(stream);
+    bput64(buf, (uint64_t)stream.size());
+    buf.insert(buf.end(), stream.begin(), stream.end());
+}
+
+// ---------------------------------------------------------------------------
+// Predictors
 // ---------------------------------------------------------------------------
 
 static inline uint16_t zigzag(int16_t v) {
-    return (uint16_t)((v >= 0) ? (v * 2) : ((-v) * 2 - 1));
+    return (v >= 0) ? (uint16_t)(v * 2) : (uint16_t)((-v) * 2 - 1);
 }
 
-// ---------------------------------------------------------------------------
-// Preditor MED (JPEG-LS)
-// ---------------------------------------------------------------------------
-
-static inline uint16_t med_predict(const std::vector<uint16_t>& block,
-                                    int x, int y) {
+// Mode 1 — avg: dampens noise in flat regions where extrapolation amplifies fluctuations.
+static inline uint16_t avg_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
     if (y == 0 && x == 0) return 0;
-    if (y == 0)           return block[x - 1];
-    if (x == 0)           return block[(y - 1) * BLOCK_SIZE + x];
-    uint16_t A = block[y       * BLOCK_SIZE + (x - 1)];
-    uint16_t B = block[(y - 1) * BLOCK_SIZE +  x     ];
-    uint16_t C = block[(y - 1) * BLOCK_SIZE + (x - 1)];
-    int pred = (int)A + (int)B - (int)C;
-    int lo   = std::min((int)A, (int)B);
-    int hi   = std::max((int)A, (int)B);
-    if (pred < lo) pred = lo;
-    if (pred > hi) pred = hi;
-    return (uint16_t)pred;
+    if (y == 0)            return blk[x - 1];
+    if (x == 0)            return blk[(y - 1) * bw + x];
+    int A = blk[y * bw + (x - 1)];
+    int B = blk[(y - 1) * bw + x];
+    int C = blk[(y - 1) * bw + (x - 1)];
+    return (uint16_t)((A + B + C + 1) / 3);
 }
 
 // ---------------------------------------------------------------------------
-// Geração de símbolos (uint16) para cada modo
+// Mode 2 — LS (Least Squares per block)
+// Finds optimal weights w[W, N, NW] by solving the normal equations on the
+// interior pixels of the block. Weights are stored in the bitstream (12 B
+// overhead) so the decoder can reproduce the exact same prediction.
 // ---------------------------------------------------------------------------
 
-static std::vector<uint16_t> make_raw(const std::vector<uint16_t>& block) {
-    return block;
-}
-
-static std::vector<uint16_t> make_left(const std::vector<uint16_t>& block) {
-    std::vector<uint16_t> syms(BLOCK_NPIX);
-    for (int y = 0; y < BLOCK_SIZE; y++) {
-        for (int x = 0; x < BLOCK_SIZE; x++) {
-            uint16_t pred;
-            if      (x > 0) pred = block[y * BLOCK_SIZE + (x - 1)];
-            else if (y > 0) pred = block[(y - 1) * BLOCK_SIZE + x];
-            else            pred = 0;
-            syms[y * BLOCK_SIZE + x] = zigzag((int16_t)(block[y * BLOCK_SIZE + x] - pred));
+static void ls_solve(double XtX[3][3], double Xty[3], float w[3]) {
+    double M[3][4];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) M[i][j] = XtX[i][j];
+        M[i][3] = Xty[i];
+    }
+    for (int col = 0; col < 3; col++) {
+        int piv = col;
+        for (int r = col + 1; r < 3; r++)
+            if (std::abs(M[r][col]) > std::abs(M[piv][col])) piv = r;
+        if (piv != col)
+            for (int k = 0; k <= 3; k++) std::swap(M[col][k], M[piv][k]);
+        double d = M[col][col];
+        if (std::abs(d) < 1e-8) { w[col] = 0.0f; continue; }
+        for (int r = 0; r < 3; r++) {
+            if (r == col) continue;
+            double f = M[r][col] / d;
+            for (int k = col; k <= 3; k++) M[r][k] -= f * M[col][k];
         }
     }
-    return syms;
+    for (int i = 0; i < 3; i++)
+        w[i] = (std::abs(M[i][i]) > 1e-8) ? (float)(M[i][3] / M[i][i]) : 0.0f;
 }
 
-static std::vector<uint16_t> make_med(const std::vector<uint16_t>& block) {
-    std::vector<uint16_t> syms(BLOCK_NPIX);
-    for (int y = 0; y < BLOCK_SIZE; y++) {
-        for (int x = 0; x < BLOCK_SIZE; x++) {
-            uint16_t pred = med_predict(block, x, y);
-            syms[y * BLOCK_SIZE + x] = zigzag((int16_t)(block[y * BLOCK_SIZE + x] - pred));
-        }
-    }
-    return syms;
-}
-
-// Mode 3: smooth causal predictor — uniform average of 3 causal neighbours
-// (Quintas-Torra et al. 2026, PASP 138:044505, Section 3.1 "2×2 uniform")
-// pred = round((A + B + C) / 3)  with A=left, B=above, C=above-left
-static std::vector<uint16_t> make_smooth(const std::vector<uint16_t>& block) {
-    std::vector<uint16_t> syms(BLOCK_NPIX);
-    for (int y = 0; y < BLOCK_SIZE; y++) {
-        for (int x = 0; x < BLOCK_SIZE; x++) {
-            uint16_t pred;
-            if (y == 0 && x == 0)   pred = 0;
-            else if (y == 0)         pred = block[x - 1];
-            else if (x == 0)         pred = block[(y - 1) * BLOCK_SIZE + x];
-            else {
-                uint16_t A = block[y       * BLOCK_SIZE + (x - 1)];
-                uint16_t B = block[(y - 1) * BLOCK_SIZE +  x     ];
-                uint16_t C = block[(y - 1) * BLOCK_SIZE + (x - 1)];
-                pred = (uint16_t)(((int)A + (int)B + (int)C + 1) / 3);
+static void ls_compute(const std::vector<uint16_t>& blk, int bw, int bh,
+                       float w[3], std::vector<uint16_t>& syms) {
+    double XtX[3][3] = {}, Xty[3] = {};
+    for (int y = 1; y < bh; y++) {
+        for (int x = 1; x < bw; x++) {
+            double f[3] = { (double)blk[y*bw+(x-1)],
+                            (double)blk[(y-1)*bw+x],
+                            (double)blk[(y-1)*bw+(x-1)] };
+            double t = blk[y*bw+x];
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) XtX[i][j] += f[i]*f[j];
+                Xty[i] += f[i]*t;
             }
-            syms[y * BLOCK_SIZE + x] = zigzag((int16_t)(block[y * BLOCK_SIZE + x] - pred));
         }
     }
-    return syms;
+    ls_solve(XtX, Xty, w);
+
+    int npix = bw * bh;
+    syms.resize(npix);
+    for (int y = 0; y < bh; y++) {
+        for (int x = 0; x < bw; x++) {
+            int idx = y*bw+x;
+            uint16_t pix = blk[idx];
+            uint16_t pred;
+            if (y == 0 && x == 0) pred = 0;
+            else if (y == 0)      pred = blk[x-1];
+            else if (x == 0)      pred = blk[(y-1)*bw+x];
+            else {
+                float p = w[0]*blk[y*bw+(x-1)] + w[1]*blk[(y-1)*bw+x] + w[2]*blk[(y-1)*bw+(x-1)];
+                pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+            }
+            syms[idx] = zigzag((int16_t)(pix - pred));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Entropia empírica (bits/símbolo, sobre uint16)
+// Symbol generation per mode (modes 0-1)
 // ---------------------------------------------------------------------------
 
-static double entropy(const std::vector<uint16_t>& syms) {
-    std::vector<uint64_t> freq(65536, 0);
-    for (uint16_t s : syms) freq[s]++;
+static void make_syms(const std::vector<uint16_t>& blk, int mode, int bw, int bh,
+                      std::vector<uint16_t>& syms) {
+    int npix = bw * bh;
+    syms.resize(npix);
+    for (int y = 0; y < bh; y++) {
+        for (int x = 0; x < bw; x++) {
+            int idx = y * bw + x;
+            uint16_t pix = blk[idx];
+            if (mode == 0) { syms[idx] = pix; continue; }
+            syms[idx] = zigzag((int16_t)(pix - avg_pred(blk, x, y, bw)));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Byte-level cost estimate: H(hi8) + H(lo8)
+// Measures what the encoder actually pays (two independent byte streams).
+// ---------------------------------------------------------------------------
+
+static double byte_cost(const std::vector<uint16_t>& syms) {
+    uint64_t hfreq[256] = {}, lfreq[256] = {};
+    for (uint16_t s : syms) { hfreq[s >> 8]++; lfreq[s & 0xFF]++; }
     double H = 0.0, N = (double)syms.size();
-    for (int i = 0; i < 65536; i++) {
-        if (freq[i] == 0) continue;
-        double p = freq[i] / N;
-        H -= p * std::log2(p);
+    for (int i = 0; i < 256; i++) {
+        if (hfreq[i]) { double p = hfreq[i] / N; H -= p * std::log2(p); }
+        if (lfreq[i]) { double p = lfreq[i] / N; H -= p * std::log2(p); }
     }
     return H;
 }
 
 // ---------------------------------------------------------------------------
-// encode_stream into a memory buffer (thread-safe, no FILE* needed)
-// ---------------------------------------------------------------------------
-
-static void buf_u8   (std::vector<uint8_t>& b, uint8_t  v) { b.push_back(v); }
-static void buf_u32le(std::vector<uint8_t>& b, uint32_t v) {
-    for (int i = 0; i < 4; i++) { b.push_back(v & 0xFF); v >>= 8; }
-}
-static void buf_u64le(std::vector<uint8_t>& b, uint64_t v) {
-    for (int i = 0; i < 8; i++) { b.push_back(v & 0xFF); v >>= 8; }
-}
-
-static void encode_stream_buf(std::vector<uint8_t>& out, const std::vector<uint8_t>& bytes) {
-    uint64_t cnt[256] = {};
-    for (uint8_t byte : bytes) cnt[byte]++;
-
-    int nnz = 0;
-    for (int i = 0; i < 256; i++) if (cnt[i] > 0) nnz++;
-
-    RansTable tab;
-    normalise_freqs(cnt, tab.freq);
-    tab.build_cumul();
-
-    RansEncoder enc;
-    for (int i = (int)bytes.size() - 1; i >= 0; i--)
-        enc.encode(bytes[i], tab);
-    enc.flush();
-
-    if (nnz < 256) {
-        buf_u8(out, (uint8_t)nnz);
-        for (int i = 0; i < 256; i++) {
-            if (tab.freq[i] == 0) continue;
-            buf_u8(out, (uint8_t)i);
-            buf_u32le(out, tab.freq[i]);
-        }
-    } else {
-        buf_u8(out, 0);
-        for (int i = 0; i < 256; i++) buf_u32le(out, tab.freq[i]);
-    }
-
-    buf_u64le(out, (uint64_t)enc.buf.size());
-    out.insert(out.end(), enc.buf.begin(), enc.buf.end());
-}
-
-// ---------------------------------------------------------------------------
-// Compress one block into a byte buffer — pure function, safe to run in threads
+// Per-block compression result
 // ---------------------------------------------------------------------------
 
 struct BlockResult {
-    uint8_t mode;
+    uint8_t              mode;
     std::vector<uint8_t> payload;
 };
 
-static BlockResult compress_block(const std::vector<uint16_t>& image, int bx, int by) {
-    std::vector<uint16_t> block(BLOCK_NPIX);
-    for (int y = 0; y < BLOCK_SIZE; y++) {
-        int gy = by * BLOCK_SIZE + y;
-        for (int x = 0; x < BLOCK_SIZE; x++)
-            block[y * BLOCK_SIZE + x] = image[gy * WIDTH + bx * BLOCK_SIZE + x];
+// W, H = full image dimensions; bs = block_size; bx, by = block column/row index
+static BlockResult compress_block(const std::vector<uint16_t>& image,
+                                   int W, int H, int bs, int bx, int by) {
+    int bw   = std::min(bs, W - bx * bs);
+    int bh   = std::min(bs, H - by * bs);
+    int npix = bw * bh;
+
+    std::vector<uint16_t> blk(npix);
+    for (int y = 0; y < bh; y++) {
+        int gy = by * bs + y;
+        for (int x = 0; x < bw; x++)
+            blk[y * bw + x] = image[gy * W + bx * bs + x];
     }
 
-    auto s0 = make_raw   (block);
-    auto s1 = make_left  (block);
-    auto s2 = make_med   (block);
-    auto s3 = make_smooth(block);
+    std::vector<uint16_t> s0, s1, s2;
+    float ls_w[3];
+    make_syms(blk, 0, bw, bh, s0);
+    make_syms(blk, 1, bw, bh, s1);
+    ls_compute(blk, bw, bh, ls_w, s2);
 
-    double H[4] = { entropy(s0), entropy(s1), entropy(s2), entropy(s3) };
+    double ls_overhead = (12.0 * 8.0) / npix;
+    const std::vector<uint16_t>* sp[3] = {&s0, &s1, &s2};
+    double costs[3] = { byte_cost(s0), byte_cost(s1),
+                        byte_cost(s2) + ls_overhead };
     int best = 0;
-    if (H[1] < H[best]) best = 1;
-    if (H[2] < H[best]) best = 2;
-    if (H[3] < H[best]) best = 3;
+    for (int m = 1; m < 3; m++)
+        if (costs[m] < costs[best]) best = m;
 
-    const auto& syms = (best == 0) ? s0 : (best == 1) ? s1 : (best == 2) ? s2 : s3;
-    std::vector<uint8_t> hi8(BLOCK_NPIX), lo8(BLOCK_NPIX);
-    for (int i = 0; i < BLOCK_NPIX; i++) {
-        hi8[i] = (uint8_t)(syms[i] >> 8);
-        lo8[i] = (uint8_t)(syms[i] & 0xFF);
+    const auto& sbest = *sp[best];
+    std::vector<uint8_t> hi(npix), lo(npix);
+    for (int i = 0; i < npix; i++) {
+        hi[i] = (uint8_t)(sbest[i] >> 8);
+        lo[i] = (uint8_t)(sbest[i] & 0xFF);
     }
 
-    BlockResult res;
-    res.mode = (uint8_t)best;
-    encode_stream_buf(res.payload, hi8);
-    encode_stream_buf(res.payload, lo8);
-    return res;
+    BlockResult r;
+    r.mode = (uint8_t)best;
+    if (best == 2) {
+        uint32_t bits;
+        for (int i = 0; i < 3; i++) {
+            memcpy(&bits, &ls_w[i], 4);
+            bput32(r.payload, bits);
+        }
+    }
+    encode_stream(r.payload, hi);
+    encode_stream(r.payload, lo);
+    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,73 +400,85 @@ static BlockResult compress_block(const std::vector<uint16_t>& image, int bx, in
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <input> <output.hais>\n", argv[0]);
+    if (argc < 3 || argc == 4 || argc > 5) {
+        fprintf(stderr, "Usage: %s <input> <output.hais> [width height]\n", argv[0]);
         return 1;
+    }
+
+    int W = 1500, H = 1500;
+    if (argc == 5) {
+        W = std::atoi(argv[3]);
+        H = std::atoi(argv[4]);
+        if (W <= 0 || H <= 0) {
+            fprintf(stderr, "Invalid dimensions %d x %d\n", W, H);
+            return 1;
+        }
     }
 
     FILE* fin = fopen(argv[1], "rb");
     if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[1]); return 1; }
-    std::vector<uint16_t> image(WIDTH * HEIGHT);
-    for (int i = 0; i < WIDTH * HEIGHT; i++) {
+    fseek(fin, 0, SEEK_END);
+    long fsize = ftell(fin);
+    rewind(fin);
+    if (fsize != (long)W * H * 2) {
+        fprintf(stderr, "Tamanho do ficheiro (%ld bytes) não corresponde a %dx%d pixels (%ld bytes esperados)\n",
+                fsize, W, H, (long)W * H * 2);
+        fclose(fin); return 1;
+    }
+    std::vector<uint16_t> image(W * H);
+    for (int i = 0; i < W * H; i++) {
         uint8_t b[2];
-        if (fread(b, 1, 2, fin) != 2) { fprintf(stderr, "Short read\n"); return 1; }
+        if (fread(b, 1, 2, fin) != 2) { fprintf(stderr, "Short read at pixel %d\n", i); return 1; }
         image[i] = (uint16_t)((b[0] << 8) | b[1]);
     }
     fclose(fin);
+
+    int bs       = BLOCK_SIZE;
+    int blocks_x = (W + bs - 1) / bs;
+    int blocks_y = (H + bs - 1) / bs;
+    int total    = blocks_x * blocks_y;
+
+    std::vector<BlockResult> results(total);
+    std::atomic<int> next{0};
+    int nthreads = std::max(1, (int)std::thread::hardware_concurrency());
+
+    auto worker = [&]() {
+        int idx;
+        while ((idx = next.fetch_add(1, std::memory_order_relaxed)) < total)
+            results[idx] = compress_block(image, W, H, bs, idx % blocks_x, idx / blocks_x);
+    };
+    std::vector<std::thread> pool(nthreads);
+    for (auto& t : pool) t = std::thread(worker);
+    for (auto& t : pool) t.join();
 
     FILE* fout = fopen(argv[2], "wb");
     if (!fout) { fprintf(stderr, "Cannot open %s\n", argv[2]); return 1; }
 
     fwrite(MAGIC, 1, 4, fout);
-    write_u16le(fout, VERSION);
-    write_u32le(fout, (uint32_t)WIDTH);
-    write_u32le(fout, (uint32_t)HEIGHT);
-    write_u32le(fout, (uint32_t)BLOCK_SIZE);
+    write_u32le(fout, (uint32_t)W);
+    write_u32le(fout, (uint32_t)H);
+    write_u32le(fout, (uint32_t)bs);
 
-    int total_blocks = BLOCKS_X * BLOCKS_Y;
-    std::vector<BlockResult> results(total_blocks);
-
-    // Compress blocks in parallel; each thread grabs the next unprocessed block
-    int nthreads = (int)std::thread::hardware_concurrency();
-    if (nthreads < 1) nthreads = 1;
-    std::atomic<int> next{0};
-
-    auto worker = [&]() {
-        int idx;
-        while ((idx = next.fetch_add(1, std::memory_order_relaxed)) < total_blocks) {
-            int by = idx / BLOCKS_X;
-            int bx = idx % BLOCKS_X;
-            results[idx] = compress_block(image, bx, by);
-        }
-    };
-
-    std::vector<std::thread> threads;
-    threads.reserve(nthreads);
-    for (int t = 0; t < nthreads; t++) threads.emplace_back(worker);
-    for (auto& th : threads) th.join();
-
-    // Write blocks in order (single-threaded, sequential)
-    int mode_count[4] = {};
-    for (int idx = 0; idx < total_blocks; idx++) {
+    int mode_count[3] = {};
+    for (int idx = 0; idx < total; idx++) {
         const auto& r = results[idx];
         mode_count[r.mode]++;
         write_u8(fout, r.mode);
         fwrite(r.payload.data(), 1, r.payload.size(), fout);
     }
-
     fclose(fout);
 
-    // Relatório
-    long in_bytes  = WIDTH * HEIGHT * 2;
-    FILE* ftmp = fopen(argv[2], "rb");
-    fseek(ftmp, 0, SEEK_END);
-    long out_bytes = ftell(ftmp);
-    fclose(ftmp);
+    long in_bytes = (long)W * H * 2;
+    FILE* ft = fopen(argv[2], "rb");
+    fseek(ft, 0, SEEK_END);
+    long out_bytes = ftell(ft);
+    fclose(ft);
 
-    fprintf(stderr, "Modos: raw=%d  left=%d  MED=%d  smooth=%d\n",
-            mode_count[0], mode_count[1], mode_count[2], mode_count[3]);
-    fprintf(stderr, "Comprimido: %ld → %ld bytes  (%.4f bits/byte)\n",
+    fprintf(stderr, "Dimensões: %dx%d  blocos: %dx%d (%d total)\n",
+            W, H, blocks_x, blocks_y, total);
+    fprintf(stderr, "Modos: raw=%d  avg=%d  ls=%d\n",
+            mode_count[0], mode_count[1], mode_count[2]);
+    fprintf(stderr, "Comprimido: %ld -> %ld bytes  (%.4f bits/byte)\n",
             in_bytes, out_bytes, out_bytes * 8.0 / in_bytes);
     return 0;
 }
