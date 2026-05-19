@@ -19,7 +19,7 @@
 #include <cstring>
 
 static constexpr uint8_t  MAGIC[4]   = {'H','A','I','S'};
-static constexpr uint32_t SCALE_BITS = 16;
+static constexpr uint32_t SCALE_BITS = 12;
 static constexpr uint32_t SCALE      = 1u << SCALE_BITS;
 static constexpr int      BLOCK_SIZE = 150;
 
@@ -33,52 +33,38 @@ struct FseDecodeEntry {
     uint16_t base;
 };
 
-struct FseEncodeRange {
-    uint16_t base;
-    uint16_t state;
-    uint8_t  nb_bits;
-};
-
 struct FseTable {
-    uint32_t freq[256];
-    std::vector<FseDecodeEntry> dec;
-    std::vector<FseEncodeRange> enc[256];
+    uint32_t freq[256] = {};
+    FseDecodeEntry dec[SCALE];
+    uint16_t enc_flat[SCALE];   // new state for each (sym, slot)
+    uint32_t enc_offset[256];   // cumulative freq offsets into enc_flat
+    int      nb_base[256];      // __builtin_clz(freq[s]) + SCALE_BITS - 32
 
     void build() {
-        dec.assign(SCALE, {});
-        for (int i = 0; i < 256; i++) enc[i].clear();
-
         uint32_t pos = 0;
         const uint32_t step = (SCALE >> 1) + (SCALE >> 3) + 3;
-        std::vector<uint8_t> spread(SCALE);
+        uint8_t spread[SCALE];
         for (int s = 0; s < 256; s++) {
             for (uint32_t n = 0; n < freq[s]; n++) {
                 spread[pos] = (uint8_t)s;
                 pos = (pos + step) & (SCALE - 1);
             }
         }
-
-        uint32_t next[256];
+        uint32_t cumul = 0;
         for (int s = 0; s < 256; s++) {
-            next[s] = freq[s];
-            enc[s].reserve(freq[s]);
+            enc_offset[s] = cumul;
+            cumul += freq[s];
+            nb_base[s] = (freq[s] > 0) ? std::max(0, (int)(__builtin_clz(freq[s]) + SCALE_BITS - 32)) : 0;
         }
-
+        uint32_t next[256];
+        for (int s = 0; s < 256; s++) next[s] = freq[s];
         for (uint32_t state = 0; state < SCALE; state++) {
             uint8_t sym = spread[state];
-            uint32_t x = next[sym]++;
-            uint8_t nb = (uint8_t)(SCALE_BITS - (31u - __builtin_clz(x)));
+            uint32_t x  = next[sym]++;
+            uint8_t nb  = (uint8_t)(SCALE_BITS - (31u - __builtin_clz(x)));
             uint32_t base = (x << nb) - SCALE;
-
-            dec[state] = {sym, nb, (uint16_t)base};
-            enc[sym].push_back({(uint16_t)base, (uint16_t)state, nb});
-        }
-
-        for (int s = 0; s < 256; s++) {
-            std::sort(enc[s].begin(), enc[s].end(),
-                      [](const FseEncodeRange& a, const FseEncodeRange& b) {
-                          return a.base < b.base;
-                      });
+            dec[state]  = {sym, nb, (uint16_t)base};
+            enc_flat[enc_offset[sym] + (x - freq[sym])] = (uint16_t)state;
         }
     }
 };
@@ -132,14 +118,11 @@ struct FseEncoder {
     BitWriter bw;
 
     void push(uint8_t sym, const FseTable& t) {
-        const auto& ranges = t.enc[sym];
-        auto it = std::upper_bound(
-            ranges.begin(), ranges.end(), state,
-            [](uint16_t value, const FseEncodeRange& r) { return value < r.base; });
-        --it;
-
-        bw.put(state - it->base, it->nb_bits);
-        state = it->state;
+        uint32_t xs = (uint32_t)state + SCALE;   // xs in [SCALE, 2*SCALE)
+        int nb = t.nb_base[sym];
+        if ((xs >> nb) >= 2 * t.freq[sym]) ++nb; // O(1) edge-case adjustment
+        bw.put(xs & ((1u << nb) - 1u), nb);
+        state = t.enc_flat[t.enc_offset[sym] + (xs >> nb) - t.freq[sym]];
     }
 
     void finish(std::vector<uint8_t>& out) {
@@ -210,6 +193,7 @@ static void encode_stream(std::vector<uint8_t>& buf, const std::vector<uint8_t>&
     }
 
     FseEncoder enc;
+    enc.bw.ops.reserve(bytes.size());
     std::vector<uint8_t> stream;
     for (int i = (int)bytes.size() - 1; i >= 0; i--) enc.push(bytes[i], tab);
     enc.finish(stream);

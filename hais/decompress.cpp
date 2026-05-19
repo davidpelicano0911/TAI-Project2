@@ -10,7 +10,7 @@
 #include <atomic>
 
 static constexpr uint8_t  MAGIC[4]   = {'H','A','I','S'};
-static constexpr uint32_t SCALE_BITS = 16;
+static constexpr uint32_t SCALE_BITS = 12;
 static constexpr uint32_t SCALE      = 1u << SCALE_BITS;
 
 // ---------------------------------------------------------------------------
@@ -24,29 +24,25 @@ struct FseDecodeEntry {
 };
 
 struct FseTable {
-    uint32_t freq[256];
-    std::vector<FseDecodeEntry> dec;
+    uint32_t freq[256] = {};
+    FseDecodeEntry dec[SCALE];
 
     void build() {
-        dec.assign(SCALE, {});
-
         uint32_t pos = 0;
         const uint32_t step = (SCALE >> 1) + (SCALE >> 3) + 3;
-        std::vector<uint8_t> spread(SCALE);
+        uint8_t spread[SCALE];
         for (int s = 0; s < 256; s++) {
             for (uint32_t n = 0; n < freq[s]; n++) {
                 spread[pos] = (uint8_t)s;
                 pos = (pos + step) & (SCALE - 1);
             }
         }
-
         uint32_t next[256];
         for (int s = 0; s < 256; s++) next[s] = freq[s];
-
         for (uint32_t state = 0; state < SCALE; state++) {
             uint8_t sym = spread[state];
-            uint32_t x = next[sym]++;
-            uint8_t nb = (uint8_t)(SCALE_BITS - (31u - __builtin_clz(x)));
+            uint32_t x  = next[sym]++;
+            uint8_t nb  = (uint8_t)(SCALE_BITS - (31u - __builtin_clz(x)));
             uint32_t base = (x << nb) - SCALE;
             dec[state] = {sym, nb, (uint16_t)base};
         }
