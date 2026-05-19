@@ -1,4 +1,4 @@
-// HAIS — Hybrid Astronomical Image decompressor
+// HAIS — Hybrid Astronomical Image decompressor (version 5)
 // Usage: ./decompress <input.hais> <output>
 
 #include <cstdio>
@@ -17,11 +17,7 @@ static constexpr uint32_t SCALE      = 1u << SCALE_BITS;
 // FSE / tANS decoder
 // ---------------------------------------------------------------------------
 
-struct FseDecodeEntry {
-    uint8_t  sym;
-    uint8_t  nb_bits;
-    uint16_t base;
-};
+struct FseDecodeEntry { uint8_t sym; uint8_t nb_bits; uint16_t base; };
 
 struct FseTable {
     uint32_t freq[256] = {};
@@ -31,12 +27,11 @@ struct FseTable {
         uint32_t pos = 0;
         const uint32_t step = (SCALE >> 1) + (SCALE >> 3) + 3;
         uint8_t spread[SCALE];
-        for (int s = 0; s < 256; s++) {
+        for (int s = 0; s < 256; s++)
             for (uint32_t n = 0; n < freq[s]; n++) {
                 spread[pos] = (uint8_t)s;
                 pos = (pos + step) & (SCALE - 1);
             }
-        }
         uint32_t next[256];
         for (int s = 0; s < 256; s++) next[s] = freq[s];
         for (uint32_t state = 0; state < SCALE; state++) {
@@ -50,32 +45,19 @@ struct FseTable {
 };
 
 struct BitReader {
-    const uint8_t* ptr;
-    const uint8_t* end;
-    uint64_t bitbuf = 0;
-    int bitcnt = 0;
-
-    BitReader(const uint8_t* begin, const uint8_t* finish) : ptr(begin), end(finish) {}
-
+    const uint8_t* ptr; const uint8_t* end;
+    uint64_t bitbuf = 0; int bitcnt = 0;
+    BitReader(const uint8_t* b, const uint8_t* e) : ptr(b), end(e) {}
     uint32_t get(int n) {
-        while (bitcnt < n && ptr < end) {
-            bitbuf |= (uint64_t)(*ptr++) << bitcnt;
-            bitcnt += 8;
-        }
+        while (bitcnt < n && ptr < end) { bitbuf |= (uint64_t)(*ptr++) << bitcnt; bitcnt += 8; }
         uint32_t v = (uint32_t)(bitbuf & ((1u << n) - 1u));
-        bitbuf >>= n;
-        bitcnt -= n;
-        return v;
+        bitbuf >>= n; bitcnt -= n; return v;
     }
 };
 
 struct FseDecoder {
-    uint16_t state;
-    BitReader br;
-
-    FseDecoder(const uint8_t* bits, const uint8_t* end, uint16_t initial_state)
-        : state(initial_state), br(bits, end) {}
-
+    uint16_t state; BitReader br;
+    FseDecoder(const uint8_t* bits, const uint8_t* end, uint16_t s) : state(s), br(bits, end) {}
     uint8_t next(const FseTable& t) {
         const FseDecodeEntry& e = t.dec[state];
         uint8_t sym = e.sym;
@@ -85,50 +67,37 @@ struct FseDecoder {
 };
 
 // ---------------------------------------------------------------------------
-// Memory-based I/O helpers
+// Memory I/O helpers
 // ---------------------------------------------------------------------------
 
-static uint8_t  pget_u8  (const uint8_t*& p) { return *p++; }
+static uint8_t  pget_u8   (const uint8_t*& p) { return *p++; }
+static uint16_t pget_u16le(const uint8_t*& p) {
+    uint16_t v = (uint16_t)p[0] | ((uint16_t)p[1] << 8); p += 2; return v;
+}
 static uint32_t pget_u32le(const uint8_t*& p) {
-    uint32_t v = (uint32_t)p[0] | ((uint32_t)p[1]<<8) | ((uint32_t)p[2]<<16) | ((uint32_t)p[3]<<24);
+    uint32_t v = (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
     p += 4; return v;
 }
 static uint64_t pget_u64le(const uint8_t*& p) {
-    uint64_t v = 0;
-    for (int i = 0; i < 8; i++) v |= (uint64_t)p[i] << (8 * i);
-    p += 8; return v;
+    uint64_t v = 0; for (int i = 0; i < 8; i++) v |= (uint64_t)p[i] << (8*i); p += 8; return v;
 }
 
 // ---------------------------------------------------------------------------
-// Decode one FSE stream from memory pointer (pointer advances past the stream)
+// Decode one FSE stream
 // ---------------------------------------------------------------------------
 
 static void decode_stream(const uint8_t*& ptr, std::vector<uint8_t>& out, int n) {
-    FseTable tab;
-    memset(tab.freq, 0, sizeof(tab.freq));
-
+    FseTable tab; memset(tab.freq, 0, sizeof(tab.freq));
     uint8_t flag = pget_u8(ptr);
-    if (flag == 0xFF) {
-        for (int i = 0; i < 256; i++) tab.freq[i] = SCALE / 256;
-    } else if (flag == 0) {
-        for (int i = 0; i < 256; i++) tab.freq[i] = pget_u32le(ptr);
-    } else {
-        int nnz = (int)flag;
-        for (int k = 0; k < nnz; k++) {
-            uint8_t  sym  = pget_u8(ptr);
-            uint32_t freq = pget_u32le(ptr);
-            tab.freq[sym] = freq;
-        }
-    }
+    if (flag == 0xFF) { for (int i = 0; i < 256; i++) tab.freq[i] = SCALE / 256; }
+    else if (flag == 0) { for (int i = 0; i < 256; i++) tab.freq[i] = pget_u32le(ptr); }
+    else { int nnz = (int)flag; for (int k = 0; k < nnz; k++) { uint8_t sym = pget_u8(ptr); tab.freq[sym] = pget_u32le(ptr); } }
     tab.build();
-
     uint64_t nbytes = pget_u64le(ptr);
-    const uint8_t* bits = ptr;
-    ptr += nbytes;
-
+    const uint8_t* bits = ptr; ptr += nbytes;
     out.resize(n);
-    uint16_t initial_state = (uint16_t)(bits[0] | ((uint16_t)bits[1] << 8));
-    FseDecoder dec(bits + 2, bits + nbytes, initial_state);
+    uint16_t init = (uint16_t)(bits[0] | ((uint16_t)bits[1] << 8));
+    FseDecoder dec(bits + 2, bits + nbytes, init);
     for (int i = 0; i < n; i++) out[i] = dec.next(tab);
 }
 
@@ -140,36 +109,33 @@ static inline int16_t zagzig(uint16_t u) {
     return (u & 1) ? -(int16_t)((u + 1) / 2) : (int16_t)(u / 2);
 }
 
-// Mode 1 — smooth average
 static inline uint16_t avg_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
     if (y == 0 && x == 0) return 0;
     if (y == 0)            return blk[x - 1];
     if (x == 0)            return blk[(y - 1) * bw + x];
-    int A = blk[y * bw + (x - 1)];
-    int B = blk[(y - 1) * bw + x];
-    int C = blk[(y - 1) * bw + (x - 1)];
+    int A = blk[y*bw+(x-1)], B = blk[(y-1)*bw+x], C = blk[(y-1)*bw+(x-1)];
     return (uint16_t)((A + B + C + 1) / 3);
 }
 
 // ---------------------------------------------------------------------------
-// Per-block decompression task
+// Per-block decompression
 // ---------------------------------------------------------------------------
 
 struct BlockTask {
-    const uint8_t* ptr;  // start of block payload (after mode byte)
+    const uint8_t* ptr;
     int mode, bw, bh;
+    uint16_t gmean;
 };
 
 static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) {
     const uint8_t* ptr = task.ptr;
     int npix = task.bw * task.bh;
 
-    float ls_w[3] = {};
+    float ls_w[3] = {}, ls4_w[4] = {};
     if (task.mode == 2) {
-        for (int i = 0; i < 3; i++) {
-            uint32_t bits = pget_u32le(ptr);
-            memcpy(&ls_w[i], &bits, 4);
-        }
+        for (int i = 0; i < 3; i++) { uint32_t bits = pget_u32le(ptr); memcpy(&ls_w[i], &bits, 4); }
+    } else if (task.mode == 4) {
+        for (int i = 0; i < 4; i++) { uint32_t bits = pget_u32le(ptr); memcpy(&ls4_w[i], &bits, 4); }
     }
 
     std::vector<uint8_t> hi8, lo8;
@@ -186,16 +152,27 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
                 pixel = sym;
             } else if (task.mode == 1) {
                 pixel = (uint16_t)((int)avg_pred(blk, x, y, task.bw) + zagzig(sym));
-            } else {
+            } else if (task.mode == 3) {
+                pixel = (uint16_t)((int)task.gmean + zagzig(sym));
+            } else if (task.mode == 4) {
+                uint16_t pred;
+                if (y == 0 && x == 0) pred = (uint16_t)std::max(0.0f,std::min(65535.0f,ls4_w[3]+0.5f));
+                else if (y == 0)      pred = (uint16_t)std::max(0.0f,std::min(65535.0f,ls4_w[0]*blk[x-1]+ls4_w[3]+0.5f));
+                else if (x == 0)      pred = (uint16_t)std::max(0.0f,std::min(65535.0f,ls4_w[1]*blk[(y-1)*task.bw+x]+ls4_w[3]+0.5f));
+                else {
+                    float p = ls4_w[0]*blk[y*task.bw+(x-1)]+ls4_w[1]*blk[(y-1)*task.bw+x]
+                             +ls4_w[2]*blk[(y-1)*task.bw+(x-1)]+ls4_w[3];
+                    pred = (uint16_t)(int)std::max(0.0f,std::min(65535.0f,p+0.5f));
+                }
+                pixel = (uint16_t)((int)pred + zagzig(sym));
+            } else {  // mode 2: LS(W,N,NW)
                 uint16_t pred;
                 if (y == 0 && x == 0) pred = 0;
                 else if (y == 0)      pred = blk[x-1];
                 else if (x == 0)      pred = blk[(y-1)*task.bw+x];
                 else {
-                    float p = ls_w[0]*blk[y*task.bw+(x-1)]
-                            + ls_w[1]*blk[(y-1)*task.bw+x]
-                            + ls_w[2]*blk[(y-1)*task.bw+(x-1)];
-                    pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+                    float p = ls_w[0]*blk[y*task.bw+(x-1)]+ls_w[1]*blk[(y-1)*task.bw+x]+ls_w[2]*blk[(y-1)*task.bw+(x-1)];
+                    pred = (uint16_t)(int)std::max(0.0f,std::min(65535.0f,p+0.5f));
                 }
                 pixel = (uint16_t)((int)pred + zagzig(sym));
             }
@@ -209,36 +186,29 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <input.hais> <output>\n", argv[0]);
-        return 1;
-    }
+    if (argc != 3) { fprintf(stderr, "Usage: %s <input.hais> <output>\n", argv[0]); return 1; }
 
-    // Read entire file into memory
     FILE* fin = fopen(argv[1], "rb");
     if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[1]); return 1; }
-    fseek(fin, 0, SEEK_END);
-    long fsize = ftell(fin);
-    rewind(fin);
+    fseek(fin, 0, SEEK_END); long fsize = ftell(fin); rewind(fin);
     std::vector<uint8_t> buf(fsize);
     [[maybe_unused]] auto rb = fread(buf.data(), 1, fsize, fin);
     fclose(fin);
 
     const uint8_t* p = buf.data();
-
     if (memcmp(p, MAGIC, 4)) { fprintf(stderr, "Bad magic\n"); return 1; }
     p += 4;
     uint32_t width  = pget_u32le(p);
     uint32_t height = pget_u32le(p);
     uint32_t bs     = pget_u32le(p);
+    uint16_t gmean  = pget_u16le(p);
 
     int blocks_x = ((int)width  + (int)bs - 1) / (int)bs;
     int blocks_y = ((int)height + (int)bs - 1) / (int)bs;
     int total    = blocks_x * blocks_y;
 
-    // Sequential pass: collect block tasks (ptr + metadata per block)
     std::vector<BlockTask> tasks(total);
-    std::vector<std::pair<int,int>> block_pos(total); // (bx, by) per block index
+    std::vector<std::pair<int,int>> block_pos(total);
 
     for (int by = 0; by < blocks_y; by++) {
         for (int bx = 0; bx < blocks_x; bx++) {
@@ -246,33 +216,28 @@ int main(int argc, char* argv[]) {
             int bw  = std::min((int)bs, (int)width  - bx * (int)bs);
             int bh  = std::min((int)bs, (int)height - by * (int)bs);
             int mode = (int)pget_u8(p);
-            tasks[idx] = {p, mode, bw, bh};
+            tasks[idx] = {p, mode, bw, bh, gmean};
             block_pos[idx] = {bx, by};
 
-            // Skip LS weights if present
-            if (mode == 2) p += 12;
+            // Skip weights
+            if      (mode == 2) p += 12;
+            else if (mode == 4) p += 16;
 
-            // Skip past the two streams without decoding
+            // Skip 2 FSE streams
             for (int s = 0; s < 2; s++) {
                 uint8_t flag = pget_u8(p);
-                if (flag == 0xFF) {
-                    // no table bytes
-                } else if (flag == 0) {
-                    p += 256 * 4;
-                } else {
-                    p += (int)flag * 5;  // nnz × (1 sym + 4 freq)
-                }
+                if (flag == 0xFF) { }
+                else if (flag == 0) { p += 256 * 4; }
+                else { p += (int)flag * 5; }
                 uint64_t nbytes = pget_u64le(p);
                 p += nbytes;
             }
         }
     }
 
-    // Parallel decompression
     std::vector<std::vector<uint16_t>> blocks(total);
     std::atomic<int> next{0};
     int nthreads = std::max(1, (int)std::thread::hardware_concurrency());
-
     auto worker = [&]() {
         int idx;
         while ((idx = next.fetch_add(1, std::memory_order_relaxed)) < total)
@@ -282,12 +247,10 @@ int main(int argc, char* argv[]) {
     for (auto& t : pool) t = std::thread(worker);
     for (auto& t : pool) t.join();
 
-    // Assemble image
     std::vector<uint16_t> image(width * height);
     for (int idx = 0; idx < total; idx++) {
         auto [bx, by] = block_pos[idx];
-        int bw = tasks[idx].bw;
-        int bh = tasks[idx].bh;
+        int bw = tasks[idx].bw, bh = tasks[idx].bh;
         const auto& blk = blocks[idx];
         for (int y = 0; y < bh; y++) {
             int gy = by * bs + y;
