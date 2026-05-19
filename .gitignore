@@ -1,0 +1,15 @@
+# Large data files — not tracked by git
+data_paper/astronomical_data_raw.zip
+data_paper/astronomical_data_raw/
+data_paper/test_images/
+
+# Build artefacts
+hais/compress
+hais/decompress
+rais/compress
+rais/decompress
+astra/compress
+astra/decompress
+helix/compress
+helix/decompress
+benchmark/benchmark
