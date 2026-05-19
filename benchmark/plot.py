@@ -3,7 +3,7 @@
 Plot compression benchmark results.
 
 Usage:
-    python plot.py [results.csv]
+    python plot.py [results.csv] [results_plot.png]
 
 Produces a scatter plot of bits/byte vs total time (compress + decompress),
 one point per compressor (averaged over all files).
@@ -15,6 +15,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 CSV = sys.argv[1] if len(sys.argv) > 1 else "results.csv"
+OUT = sys.argv[2] if len(sys.argv) > 2 else "results_plot.png"
 
 df = pd.read_csv(CSV)
 df = df[df["lossless"] == True].copy()
@@ -38,6 +39,11 @@ FAMILY_COLORS = {
     "rais":  "#e11d48",
     "astra": "#f59e0b",
     "hais":  "#0d9488",
+    "helix": "#be185d",
+    "prism": "#dc2626",
+    "src-fast": "#4ade80",
+    "src-ratio": "#22c55e",
+    "src-balanced": "#15803d",
 }
 
 def family(name):
@@ -131,7 +137,6 @@ ax.set_ylabel("bits / byte of original  (total over all files)", fontsize=10)
 ax.set_title("Compression Benchmark — bits/byte vs total time", fontsize=12, fontweight="bold")
 
 plt.tight_layout()
-out = CSV.replace(".csv", "_plot.png")
-plt.savefig(out, dpi=150, facecolor="white")
-print(f"Saved: {out}")
+plt.savefig(OUT, dpi=150, facecolor="white")
+print(f"Saved: {OUT}")
 plt.show()

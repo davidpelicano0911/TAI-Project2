@@ -4,6 +4,7 @@ TARGET   = benchmark
 DATA_DIR ?= ../data2
 TMP_DIR  ?= /tmp/tai_bench
 CSV      ?= results.csv
+PLOT     ?= results_plot.png
 BENCHMARK_TOOLS = gzip bzip2 xz zstd
 
 .PHONY: all run csv benchmark-run current check-tools plot clean
@@ -31,7 +32,7 @@ run csv benchmark-run: $(TARGET) current check-tools
 	./$(TARGET) $(DATA_DIR) $(TMP_DIR) -o $(CSV)
 
 plot: $(CSV)
-	python3 plot.py $(CSV)
+	python3 plot.py $(CSV) $(PLOT)
 
 clean:
-	rm -f $(TARGET) $(CSV) results_plot.png
+	rm -f $(TARGET) $(CSV) $(PLOT)
