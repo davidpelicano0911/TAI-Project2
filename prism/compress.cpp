@@ -6,10 +6,10 @@
 // frequency tables stored in the file — smaller header overhead and better
 // adaptation to local image statistics.
 //
-// Adaptive model: each of the 9 contexts (1 hi + 8 lo) maintains a 256-entry
-// count array initialised to 1 (flat).  After encoding each symbol the count
-// is incremented.  When the total exceeds MAX_TOTAL the whole table is halved
-// (floor) with a minimum of 1, keeping the model from going stale.
+// Adaptive model: each of the 9 contexts (1 hi + 8 lo) maintains 256 symbol
+// counts plus a Fenwick tree for cumulative frequencies.  After encoding each
+// symbol the count is incremented.  When the total exceeds MAX_TOTAL the whole
+// table is halved (floor) with a minimum of 1, keeping the model from going stale.
 //
 // Format (little-endian):
 //   [4]  magic  "PRM3"
@@ -67,25 +67,49 @@ static inline uint16_t zigzag_enc(uint16_t u) {
 }
 
 // ---------------------------------------------------------------------------
-// Adaptive frequency model (256 symbols, online halving)
+// Adaptive frequency model (256 symbols, Fenwick cumulative table)
 // ---------------------------------------------------------------------------
 
 static constexpr uint32_t MAX_TOTAL = 1u << 16;  // halve when total exceeds this
+static constexpr int      N_SYMS    = 256;
 
 struct AdaptModel {
-    uint32_t freq[256];
-    uint32_t cumul[257];
+    uint32_t freq[N_SYMS];
+    uint32_t tree[N_SYMS + 1];
     uint32_t total;
 
     void init() {
-        for (int i = 0; i < 256; i++) freq[i] = 1;
-        total = 256;
-        build_cumul();
+        for (int i = 0; i < N_SYMS; i++) freq[i] = 1;
+        total = N_SYMS;
+        rebuild_tree();
     }
 
-    void build_cumul() {
-        cumul[0] = 0;
-        for (int i = 0; i < 256; i++) cumul[i+1] = cumul[i] + freq[i];
+    void add_tree(int sym, uint32_t delta) {
+        for (int i = sym + 1; i <= N_SYMS; i += i & -i) tree[i] += delta;
+    }
+
+    void rebuild_tree() {
+        for (int i = 0; i <= N_SYMS; i++) tree[i] = 0;
+        for (int i = 0; i < N_SYMS; i++) add_tree(i, freq[i]);
+    }
+
+    uint32_t prefix_less(int sym) const {
+        uint32_t sum = 0;
+        for (int i = sym; i > 0; i -= i & -i) sum += tree[i];
+        return sum;
+    }
+
+    uint8_t find(uint32_t slot) const {
+        uint32_t idx = 0;
+        uint32_t sum = 0;
+        for (uint32_t bit = N_SYMS >> 1; bit != 0; bit >>= 1) {
+            uint32_t next = idx + bit;
+            if (next <= N_SYMS && sum + tree[next] <= slot) {
+                idx = next;
+                sum += tree[next];
+            }
+        }
+        return (uint8_t)idx;
     }
 
     void update(uint8_t sym) {
@@ -93,25 +117,14 @@ struct AdaptModel {
         total++;
         if (total >= MAX_TOTAL) {
             total = 0;
-            for (int i = 0; i < 256; i++) {
+            for (int i = 0; i < N_SYMS; i++) {
                 freq[i] = (freq[i] + 1) >> 1;  // halve, min 1
                 total += freq[i];
             }
-            build_cumul();
+            rebuild_tree();
             return;
         }
-        for (int i = (int)sym + 1; i <= 256; i++) cumul[i]++;
-    }
-
-    uint8_t find(uint32_t slot) const {
-        // Binary search in cumul[0..256]
-        int lo = 0, hi = 255;
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (cumul[mid+1] <= slot) lo = mid + 1;
-            else                      hi = mid;
-        }
-        return (uint8_t)lo;
+        add_tree(sym, 1);
     }
 };
 
@@ -143,9 +156,10 @@ struct RangeEncoder {
 
     void encode(AdaptModel& m, uint8_t sym) {
         uint32_t r = range / m.total;
-        low += (uint64_t)m.cumul[sym] * r;
-        range = (sym < 255) ? (m.cumul[sym+1] - m.cumul[sym]) * r
-                            : range - m.cumul[sym] * r;
+        uint32_t cumul = m.prefix_less(sym);
+        low += (uint64_t)cumul * r;
+        range = (sym < 255) ? m.freq[sym] * r
+                            : range - cumul * r;
         while (range < (1u << 24)) { range <<= 8; shift(); }
         m.update(sym);
     }
@@ -179,17 +193,18 @@ static int compress(const char* in_path, const char* out_path) {
     if (fsize != (long)npix * 2) {
         fprintf(stderr, "Unexpected file size %ld\n", fsize); fclose(fin); return 1;
     }
-    std::vector<uint16_t> image(npix);
-    for (int i = 0; i < npix; i++) {
-        uint8_t b[2];
-        if (!read_exact(fin, b, 2)) {
-            fprintf(stderr, "Input read failed\n");
-            fclose(fin);
-            return 1;
-        }
-        image[i] = (uint16_t)((b[0] << 8) | b[1]);
+    std::vector<uint8_t> input((size_t)fsize);
+    if (!read_exact(fin, input.data(), input.size())) {
+        fprintf(stderr, "Input read failed\n");
+        fclose(fin);
+        return 1;
     }
     fclose(fin);
+
+    std::vector<uint16_t> image(npix);
+    for (int i = 0; i < npix; i++) {
+        image[i] = (uint16_t)((input[(size_t)i * 2] << 8) | input[(size_t)i * 2 + 1]);
+    }
 
     // Adaptive models: 1 hi + N_LO_CTX lo
     AdaptModel m_hi;
@@ -198,7 +213,7 @@ static int compress(const char* in_path, const char* out_path) {
     for (int c = 0; c < N_LO_CTX; c++) m_lo[c].init();
 
     RangeEncoder enc;
-    std::vector<int16_t> raw_res(npix);
+    std::vector<int16_t> prev_res(WIDTH, 0), curr_res(WIDTH, 0);
 
     for (int gy = 0; gy < HEIGHT; gy++) {
         for (int gx = 0; gx < WIDTH; gx++) {
@@ -213,11 +228,11 @@ static int compress(const char* in_path, const char* out_path) {
             uint8_t  lo   = (uint8_t)(zz & 0xFF);
 
             int16_t res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
-            raw_res[gy*WIDTH+gx] = res;
+            curr_res[gx] = res;
 
             // Context for lo byte
-            int mW = (gx > 0) ? std::abs((int)raw_res[gy*WIDTH+gx-1]) : 0;
-            int mN = (gy > 0) ? std::abs((int)raw_res[(gy-1)*WIDTH+gx]) : 0;
+            int mW = (gx > 0) ? std::abs((int)curr_res[gx-1]) : 0;
+            int mN = (gy > 0) ? std::abs((int)prev_res[gx]) : 0;
             int mg = mW + mN;
             int ctx;
             if      (mg ==  0) ctx = 0;
@@ -232,6 +247,7 @@ static int compress(const char* in_path, const char* out_path) {
             enc.encode(m_hi,     hi);
             enc.encode(m_lo[ctx], lo);
         }
+        prev_res.swap(curr_res);
     }
     enc.finish();
 

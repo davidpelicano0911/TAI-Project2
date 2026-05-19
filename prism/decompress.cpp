@@ -41,21 +41,46 @@ static inline uint16_t zigzag_dec(uint16_t z) {
 // ---------------------------------------------------------------------------
 
 static constexpr uint32_t MAX_TOTAL = 1u << 16;
+static constexpr int      N_SYMS    = 256;
 
 struct AdaptModel {
-    uint32_t freq[256];
-    uint32_t cumul[257];
+    uint32_t freq[N_SYMS];
+    uint32_t tree[N_SYMS + 1];
     uint32_t total;
 
     void init() {
-        for (int i = 0; i < 256; i++) freq[i] = 1;
-        total = 256;
-        build_cumul();
+        for (int i = 0; i < N_SYMS; i++) freq[i] = 1;
+        total = N_SYMS;
+        rebuild_tree();
     }
 
-    void build_cumul() {
-        cumul[0] = 0;
-        for (int i = 0; i < 256; i++) cumul[i+1] = cumul[i] + freq[i];
+    void add_tree(int sym, uint32_t delta) {
+        for (int i = sym + 1; i <= N_SYMS; i += i & -i) tree[i] += delta;
+    }
+
+    void rebuild_tree() {
+        for (int i = 0; i <= N_SYMS; i++) tree[i] = 0;
+        for (int i = 0; i < N_SYMS; i++) add_tree(i, freq[i]);
+    }
+
+    uint32_t prefix_less(int sym) const {
+        uint32_t sum = 0;
+        for (int i = sym; i > 0; i -= i & -i) sum += tree[i];
+        return sum;
+    }
+
+    uint8_t find(uint32_t slot, uint32_t& cumul) const {
+        uint32_t idx = 0;
+        uint32_t sum = 0;
+        for (uint32_t bit = N_SYMS >> 1; bit != 0; bit >>= 1) {
+            uint32_t next = idx + bit;
+            if (next <= N_SYMS && sum + tree[next] <= slot) {
+                idx = next;
+                sum += tree[next];
+            }
+        }
+        cumul = sum;
+        return (uint8_t)idx;
     }
 
     void update(uint8_t sym) {
@@ -63,24 +88,14 @@ struct AdaptModel {
         total++;
         if (total >= MAX_TOTAL) {
             total = 0;
-            for (int i = 0; i < 256; i++) {
+            for (int i = 0; i < N_SYMS; i++) {
                 freq[i] = (freq[i] + 1) >> 1;
                 total += freq[i];
             }
-            build_cumul();
+            rebuild_tree();
             return;
         }
-        for (int i = (int)sym + 1; i <= 256; i++) cumul[i]++;
-    }
-
-    uint8_t find(uint32_t slot) const {
-        int lo = 0, hi = 255;
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (cumul[mid+1] <= slot) lo = mid + 1;
-            else                      hi = mid;
-        }
-        return (uint8_t)lo;
+        add_tree(sym, 1);
     }
 };
 
@@ -101,10 +116,11 @@ struct RangeDecoder {
     uint8_t decode(AdaptModel& m) {
         uint32_t r    = range / m.total;
         uint32_t slot = std::min(code / r, m.total - 1);
-        uint8_t  sym  = m.find(slot);
-        code  -= m.cumul[sym] * r;
-        range  = (sym < 255) ? (m.cumul[sym+1] - m.cumul[sym]) * r
-                             : range - m.cumul[sym] * r;
+        uint32_t cumul = 0;
+        uint8_t  sym  = m.find(slot, cumul);
+        code  -= cumul * r;
+        range  = (sym < 255) ? m.freq[sym] * r
+                             : range - cumul * r;
         while (range < (1u << 24)) { code = (code << 8) | (*ptr++); range <<= 8; }
         m.update(sym);
         return sym;
@@ -163,8 +179,6 @@ int main(int argc, char* argv[]) {
     }
     fclose(fin);
 
-    int npix = (int)(width * height);
-
     AdaptModel m_hi;
     m_hi.init();
     AdaptModel m_lo[N_LO_CTX];
@@ -173,19 +187,25 @@ int main(int argc, char* argv[]) {
     RangeDecoder dec;
     dec.init(stream.data());
 
-    std::vector<uint16_t> image(npix);
-    std::vector<int16_t>  raw_res(npix, 0);
+    FILE* fout = fopen(argv[2], "wb");
+    if (!fout) { fprintf(stderr, "Cannot open output: %s\n", argv[2]); return 1; }
 
-    for (int gy = 0; gy < (int)height; gy++) {
-        for (int gx = 0; gx < (int)width; gx++) {
-            int W  = (gx > 0)           ? image[gy*(int)width+gx-1]     : 0;
-            int N  = (gy > 0)           ? image[(gy-1)*(int)width+gx]   : W;
-            int NW = (gy > 0 && gx > 0) ? image[(gy-1)*(int)width+gx-1] : W;
+    int w = (int)width;
+    int h = (int)height;
+    std::vector<uint16_t> prev_img(w, 0), curr_img(w, 0);
+    std::vector<int16_t>  prev_res(w, 0), curr_res(w, 0);
+    std::vector<uint8_t>  out_row((size_t)w * 2);
+
+    for (int gy = 0; gy < h; gy++) {
+        for (int gx = 0; gx < w; gx++) {
+            int W  = (gx > 0)           ? curr_img[gx-1]     : 0;
+            int N  = (gy > 0)           ? prev_img[gx]       : W;
+            int NW = (gy > 0 && gx > 0) ? prev_img[gx-1]     : W;
 
             uint16_t pred = (gy == 0 && gx == 0) ? 0u : gap_predict(W, N, NW);
 
-            int mW = (gx > 0) ? std::abs((int)raw_res[gy*(int)width+gx-1]) : 0;
-            int mN = (gy > 0) ? std::abs((int)raw_res[(gy-1)*(int)width+gx]) : 0;
+            int mW = (gx > 0) ? std::abs((int)curr_res[gx-1]) : 0;
+            int mN = (gy > 0) ? std::abs((int)prev_res[gx]) : 0;
             int mg = mW + mN;
             int ctx;
             if      (mg ==  0) ctx = 0;
@@ -202,17 +222,17 @@ int main(int argc, char* argv[]) {
             uint16_t zz  = ((uint16_t)hi << 8) | lo;
             uint16_t u   = zigzag_dec(zz);
             int16_t  res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
-            raw_res[gy*(int)width+gx] = res;
-            image[gy*(int)width+gx]   = (uint16_t)(pred + u);
+            uint16_t pix = (uint16_t)(pred + u);
+            curr_res[gx] = res;
+            curr_img[gx] = pix;
+            out_row[(size_t)gx * 2]     = (uint8_t)(pix >> 8);
+            out_row[(size_t)gx * 2 + 1] = (uint8_t)(pix & 0xFF);
         }
+        fwrite(out_row.data(), 1, out_row.size(), fout);
+        prev_res.swap(curr_res);
+        prev_img.swap(curr_img);
     }
 
-    FILE* fout = fopen(argv[2], "wb");
-    if (!fout) { fprintf(stderr, "Cannot open output: %s\n", argv[2]); return 1; }
-    for (int i = 0; i < npix; i++) {
-        uint8_t b[2] = { (uint8_t)(image[i] >> 8), (uint8_t)(image[i] & 0xFF) };
-        fwrite(b, 1, 2, fout);
-    }
     fclose(fout);
     return 0;
 }

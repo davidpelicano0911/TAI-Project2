@@ -2,7 +2,7 @@
 
 Lossless compressor for 1500x1500 raw 16-bit astronomical images. PRISM uses
 a causal predictor, modular residual coding, and an inline adaptive range coder.
-It does not depend on `src/balanced` or any project-local coder headers.
+It does not depend on project-local coder headers.
 
 ## Algorithm
 
@@ -41,7 +41,15 @@ residual magnitudes.
 The entropy coder is implemented directly in `compress.cpp` and
 `decompress.cpp`. Each model starts with frequency 1 for all 256 byte symbols,
 updates after every symbol, and halves all frequencies when the total reaches
-`1 << 16`. No histograms or rANS tables are stored in the file.
+`1 << 16`.
+
+The cumulative-frequency table is maintained with a Fenwick tree, so adaptive
+updates and decoder symbol lookup stay logarithmic without changing the coded
+probabilities. No histograms or rANS tables are stored in the file.
+
+The implementation reads input in bulk, keeps residual/image neighbourhood
+state in row buffers, and writes decompressed output a row at a time. These are
+speed and memory-locality optimisations only; they do not change the stream.
 
 ## Build & Use
 

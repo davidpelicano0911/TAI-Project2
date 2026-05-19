@@ -17,6 +17,8 @@ $(TARGET): benchmark.cpp
 current:
 	$(MAKE) -C ../rais
 	$(MAKE) -C ../astra
+	$(MAKE) -C ../prism
+	$(MAKE) -C ../prism_block
 
 check-tools:
 	@missing=0; \
