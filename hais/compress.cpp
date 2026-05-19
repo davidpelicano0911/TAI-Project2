@@ -81,7 +81,6 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
     for (int m = 1; m < 5; m++)
         if (costs[m] < costs[best]) best = m;
 
-    // Split best residuals into hi8 and lo8 streams.
     const auto& sbest = *sp[best];
     std::vector<uint8_t> hi(npix), lo(npix);
     for (int i = 0; i < npix; i++) { hi[i] = sbest[i] >> 8; lo[i] = sbest[i] & 0xFF; }
@@ -102,6 +101,37 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
 }
 
 // ---------------------------------------------------------------------------
+// Infer image dimensions from file size (npix = fsize/2 pixels).
+// Tries square root first, then common widths, then 1×npix fallback.
+// ---------------------------------------------------------------------------
+
+static bool infer_dims(long fsize, int& W, int& H) {
+    if (fsize <= 0 || fsize % 2 != 0) return false;
+    long npix = fsize / 2;
+    long sq   = (long)std::sqrt((double)npix);
+    if (sq * sq == npix) { W = H = (int)sq; return true; }
+    for (int w : {1500, 2048, 4096, 3000, 2000, 1920, 1024, 512, 256}) {
+        if (npix % w == 0) { W = w; H = (int)(npix / w); return true; }
+    }
+    W = (int)npix; H = 1;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Choose block size: largest BS ≤ 512 that divides both W and H exactly,
+// yielding at least 4 blocks. Falls back to 256 (with partial blocks).
+// ---------------------------------------------------------------------------
+
+static int choose_block_size(int W, int H) {
+    for (int bs = 512; bs >= 32; bs--) {
+        if (W % bs == 0 && H % bs == 0) {
+            if ((W / bs) * (H / bs) >= 4) return bs;
+        }
+    }
+    return 256;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -111,20 +141,26 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int W = 1500, H = 1500;
-    if (argc == 5) {
-        W = std::atoi(argv[3]); H = std::atoi(argv[4]);
-        if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); return 1; }
-    }
-
     // Read input.
     FILE* fin = fopen(argv[1], "rb");
     if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[1]); return 1; }
     fseek(fin, 0, SEEK_END); long fsize = ftell(fin); rewind(fin);
-    if (fsize != (long)W * H * 2) {
-        fprintf(stderr, "File size mismatch: got %ld, expected %ld\n", fsize, (long)W * H * 2);
-        fclose(fin); return 1;
+
+    int W, H;
+    if (argc == 5) {
+        W = std::atoi(argv[3]); H = std::atoi(argv[4]);
+        if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); fclose(fin); return 1; }
+        if (fsize != (long)W * H * 2) {
+            fprintf(stderr, "File size mismatch: got %ld, expected %d\n", fsize, W * H * 2);
+            fclose(fin); return 1;
+        }
+    } else {
+        if (!infer_dims(fsize, W, H)) {
+            fprintf(stderr, "Cannot infer dimensions from file size %ld\n", fsize);
+            fclose(fin); return 1;
+        }
     }
+
     std::vector<uint16_t> image(W * H);
     for (int i = 0; i < W * H; i++) {
         uint8_t b[2];
@@ -138,7 +174,7 @@ int main(int argc, char* argv[]) {
     for (auto px : image) sum += px;
     uint16_t gmean = (uint16_t)(sum / (W * H));
 
-    int bs       = BLOCK_SIZE;
+    int bs       = choose_block_size(W, H);
     int blocks_x = (W + bs - 1) / bs;
     int blocks_y = (H + bs - 1) / bs;
     int total    = blocks_x * blocks_y;

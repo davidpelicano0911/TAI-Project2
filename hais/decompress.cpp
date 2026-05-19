@@ -50,62 +50,66 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
 
     // Reconstruct pixels.
     blk.resize(npix);
+    BiasState bs;
     for (int y = 0; y < task.bh; y++) {
         for (int x = 0; x < task.bw; x++) {
             int      idx = y * task.bw + x;
             uint16_t sym = ((uint16_t)hi8[idx] << 8) | lo8[idx];
             uint16_t pixel;
 
-            switch (task.mode) {
-            case 0:  // raw
+            if (task.mode == 0) {
+                // Raw mode: no predictor, no bias correction.
                 pixel = sym;
-                break;
-            case 1:  // avg
-                pixel = (uint16_t)((int)avg_pred(blk, x, y, task.bw) + zagzig(sym));
-                break;
-            case 3:  // global_mean
-                pixel = (uint16_t)((int)task.gmean + zagzig(sym));
-                break;
-            case 2: {  // LS(W, N, NW)
+            } else {
+                // Compute base predictor.
                 uint16_t pred;
-                if (y == 0 && x == 0)
+                switch (task.mode) {
+                case 1:  // avg
+                    pred = avg_pred(blk, x, y, task.bw);
+                    break;
+                case 3:  // global_mean
+                    pred = task.gmean;
+                    break;
+                case 2: {  // LS(W, N, NW)
+                    if (y == 0 && x == 0)
+                        pred = 0;
+                    else if (y == 0)
+                        pred = blk[x - 1];
+                    else if (x == 0)
+                        pred = blk[(y-1)*task.bw+x];
+                    else {
+                        float p = ls_w[0]*blk[y*task.bw+(x-1)]
+                                + ls_w[1]*blk[(y-1)*task.bw+x]
+                                + ls_w[2]*blk[(y-1)*task.bw+(x-1)];
+                        pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+                    }
+                    break;
+                }
+                case 4: {  // LS+bias(W, N, NW, 1)
+                    if (y == 0 && x == 0)
+                        pred = (uint16_t)std::max(0.0f, std::min(65535.0f, ls4_w[3] + 0.5f));
+                    else if (y == 0)
+                        pred = (uint16_t)std::max(0.0f, std::min(65535.0f,
+                                   ls4_w[0]*blk[x-1] + ls4_w[3] + 0.5f));
+                    else if (x == 0)
+                        pred = (uint16_t)std::max(0.0f, std::min(65535.0f,
+                                   ls4_w[1]*blk[(y-1)*task.bw+x] + ls4_w[3] + 0.5f));
+                    else {
+                        float p = ls4_w[0]*blk[y*task.bw+(x-1)]
+                                + ls4_w[1]*blk[(y-1)*task.bw+x]
+                                + ls4_w[2]*blk[(y-1)*task.bw+(x-1)]
+                                + ls4_w[3];
+                        pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+                    }
+                    break;
+                }
+                default:
                     pred = 0;
-                else if (y == 0)
-                    pred = blk[x - 1];
-                else if (x == 0)
-                    pred = blk[(y-1)*task.bw+x];
-                else {
-                    float p = ls_w[0]*blk[y*task.bw+(x-1)]
-                            + ls_w[1]*blk[(y-1)*task.bw+x]
-                            + ls_w[2]*blk[(y-1)*task.bw+(x-1)];
-                    pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+                    break;
                 }
-                pixel = (uint16_t)((int)pred + zagzig(sym));
-                break;
-            }
-            case 4: {  // LS+bias(W, N, NW, 1)
-                uint16_t pred;
-                if (y == 0 && x == 0)
-                    pred = (uint16_t)std::max(0.0f, std::min(65535.0f, ls4_w[3] + 0.5f));
-                else if (y == 0)
-                    pred = (uint16_t)std::max(0.0f, std::min(65535.0f,
-                               ls4_w[0]*blk[x-1] + ls4_w[3] + 0.5f));
-                else if (x == 0)
-                    pred = (uint16_t)std::max(0.0f, std::min(65535.0f,
-                               ls4_w[1]*blk[(y-1)*task.bw+x] + ls4_w[3] + 0.5f));
-                else {
-                    float p = ls4_w[0]*blk[y*task.bw+(x-1)]
-                            + ls4_w[1]*blk[(y-1)*task.bw+x]
-                            + ls4_w[2]*blk[(y-1)*task.bw+(x-1)]
-                            + ls4_w[3];
-                    pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
-                }
-                pixel = (uint16_t)((int)pred + zagzig(sym));
-                break;
-            }
-            default:
-                pixel = sym;
-                break;
+
+                int16_t rc = zagzig(sym);
+                pixel = (uint16_t)((int)pred + rc);
             }
             blk[idx] = pixel;
         }

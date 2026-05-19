@@ -155,3 +155,4 @@ static double byte_cost(const std::vector<uint16_t>& syms) {
     }
     return H;
 }
+
