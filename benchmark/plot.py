@@ -3,27 +3,35 @@
 Plot compression benchmark results — dark theme, Pareto frontier curve.
 
 Usage:
-    python plot.py [results.csv]
+    python plot.py [results.csv] [results_plot.png]
 """
 
 import sys
+import csv
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from scipy.interpolate import PchipInterpolator
 
 CSV = sys.argv[1] if len(sys.argv) > 1 else "results.csv"
+OUT = sys.argv[2] if len(sys.argv) > 2 else "results_plot.png"
 
-df = pd.read_csv(CSV)
-df = df[df["lossless"] == True].copy()
-df["t_total_s"] = (df["compress_ms"] + df["decompress_ms"]) / 1000.0
+groups = {}
+with open(CSV, newline="") as f:
+    for row in csv.DictReader(f):
+        if row["lossless"].lower() != "true":
+            continue
+        name = row["compressor"]
+        groups.setdefault(name, {"compressor": name, "bpp": [], "t_total_s": 0.0})
+        groups[name]["bpp"].append(float(row["bpp"]))
+        groups[name]["t_total_s"] += (float(row["compress_ms"]) + float(row["decompress_ms"])) / 1000.0
 
-agg = (
-    df.groupby("compressor")
-    .agg(bits_per_byte=("bpp", "mean"), t_total_s=("t_total_s", "sum"))
-    .reset_index()
-)
+agg = []
+for item in groups.values():
+    agg.append({
+        "compressor": item["compressor"],
+        "bits_per_byte": float(np.mean(item["bpp"])),
+        "t_total_s": item["t_total_s"],
+    })
 
 FAMILY_COLORS = {
     "gzip":  "#2563eb",
@@ -33,6 +41,9 @@ FAMILY_COLORS = {
     "rais":  "#dc2626",
     "astra": "#d97706",
     "hais":  "#0d9488",
+    "helix": "#be185d",
+    "prism-block": "#991b1b",
+    "prism": "#dc2626",
 }
 
 def family(name):
@@ -41,13 +52,14 @@ def family(name):
             return k
     return "other"
 
-agg["family"] = agg["compressor"].apply(family)
-agg["color"]  = agg["family"].map(FAMILY_COLORS).fillna("#9ca3af")
+for row in agg:
+    row["family"] = family(row["compressor"])
+    row["color"] = FAMILY_COLORS.get(row["family"], "#9ca3af")
 
 # ---------------------------------------------------------------------------
 # Pareto frontier (lower-left envelope: best bpp for each time budget)
 # ---------------------------------------------------------------------------
-pts = agg[["t_total_s", "bits_per_byte"]].values
+pts = np.array([[row["t_total_s"], row["bits_per_byte"]] for row in agg])
 sorted_idx = np.argsort(pts[:, 0])
 sorted_pts = pts[sorted_idx]
 pareto = [sorted_pts[0]]
@@ -82,40 +94,32 @@ ax.grid(True, which="both", zorder=0)
 ax.set_axisbelow(True)
 
 # ---------------------------------------------------------------------------
-# Pareto curve — smooth monotone spline in log-log space (PchipInterpolator)
+# Pareto curve
 # ---------------------------------------------------------------------------
 if len(pareto) >= 2:
-    x_all = agg["t_total_s"].values
-    x_min = min(x_all) * 0.6
-    x_max = max(x_all) * 1.4
-
-    log_x_p   = np.log10(pareto[:, 0])
-    log_bpp_p = np.log10(pareto[:, 1])
-
-    # Pad boundary points so the curve extends across the full data range
-    # Left pad: extrapolate slope; right pad: gentle slope continuing down
-    slope_l = (log_bpp_p[1]  - log_bpp_p[0])  / (log_x_p[1]  - log_x_p[0])  if len(pareto) > 1 else -0.1
-    slope_r = -0.04  # gentle right tail — no compressor beats the last pareto point significantly
-
-    lx_l = np.log10(x_min);  lbpp_l = log_bpp_p[0]  + slope_l * (lx_l - log_x_p[0])
-    lx_r = np.log10(x_max);  lbpp_r = log_bpp_p[-1] + slope_r * (lx_r - log_x_p[-1])
-
-    log_x_ext   = np.concatenate([[lx_l],   log_x_p,   [lx_r]])
-    log_bpp_ext = np.concatenate([[lbpp_l], log_bpp_p, [lbpp_r]])
-
-    interp   = PchipInterpolator(log_x_ext, log_bpp_ext)
-    x_smooth = np.logspace(np.log10(x_min), np.log10(x_max), 400)
-    y_smooth = 10.0 ** interp(np.log10(x_smooth))
-    ax.plot(x_smooth, y_smooth, color="#6b7280", linewidth=1.6, alpha=0.8, zorder=2)
+    ax.plot(pareto[:, 0], pareto[:, 1], color="#6b7280",
+            linewidth=1.6, alpha=0.8, zorder=2)
 
 # ---------------------------------------------------------------------------
 # Scatter points
 # ---------------------------------------------------------------------------
-for _, row in agg.iterrows():
+for row in agg:
     ax.scatter(
         row["t_total_s"], row["bits_per_byte"],
         color=row["color"], s=170, zorder=4,
         edgecolors="#374151", linewidths=0.5,
+    )
+    ax.annotate(
+        row["compressor"],
+        (row["t_total_s"], row["bits_per_byte"]),
+        xytext=(7, 0),
+        textcoords="offset points",
+        va="center",
+        ha="left",
+        fontsize=8,
+        color="#111827",
+        zorder=5,
+        clip_on=False,
     )
 
 # ---------------------------------------------------------------------------
@@ -149,7 +153,6 @@ ax.text(0.5, 1.028, "Showing results for Overall",
         transform=ax.transAxes, ha="center", fontsize=9, color=LABEL)
 
 plt.tight_layout()
-out = CSV.replace(".csv", "_plot.png")
-plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=BG)
-print(f"Saved: {out}")
+plt.savefig(OUT, dpi=150, bbox_inches="tight", facecolor=BG)
+print(f"Saved: {OUT}")
 plt.show()
