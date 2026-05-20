@@ -93,34 +93,40 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
         for (int i = 0; i < 5; i++) { memcpy(&bits, &ls5_w[i], 4); bput32(whdr, bits); }
     }
 
+    // Encode hi once — shared between plain and ctx payloads.
+    std::vector<uint8_t> hi_stream;
+    encode_stream(hi_stream, hi);
+
     // Build plain payload (2 streams: hi, lo).
     std::vector<uint8_t> plain;
     plain.insert(plain.end(), whdr.begin(), whdr.end());
-    encode_stream(plain, hi);
+    plain.insert(plain.end(), hi_stream.begin(), hi_stream.end());
     encode_stream(plain, lo);
 
-    // Build context payload (3 streams: hi, lo_zero, lo_nonzero).
-    // Split lo by whether hi==0 (small residual) or hi!=0 (large residual).
+    // Build context payload (3 streams: hi, lo_zero, lo_nonzero) only when the
+    // split is balanced enough to potentially help (2%–98% zeros).
     std::vector<uint8_t> lo_zero, lo_nonzero;
     lo_zero.reserve(npix); lo_nonzero.reserve(npix);
     for (int i = 0; i < npix; i++) {
         if (hi[i] == 0) lo_zero.push_back(lo[i]);
         else            lo_nonzero.push_back(lo[i]);
     }
-    std::vector<uint8_t> ctx;
-    ctx.insert(ctx.end(), whdr.begin(), whdr.end());
-    encode_stream(ctx, hi);
-    encode_stream(ctx, lo_zero);
-    encode_stream(ctx, lo_nonzero);
-
+    int nzero = (int)lo_zero.size();
     BlockResult r;
-    if (ctx.size() < plain.size()) {
-        r.mode    = (uint8_t)(mode_id | 0x80);  // bit 7 = context FSE flag
-        r.payload = std::move(ctx);
-    } else {
-        r.mode    = (uint8_t)mode_id;
-        r.payload = std::move(plain);
+    if (nzero >= npix / 50 && nzero <= npix - npix / 50) {
+        std::vector<uint8_t> ctx;
+        ctx.insert(ctx.end(), whdr.begin(), whdr.end());
+        ctx.insert(ctx.end(), hi_stream.begin(), hi_stream.end());
+        encode_stream(ctx, lo_zero);
+        encode_stream(ctx, lo_nonzero);
+        if (ctx.size() < plain.size()) {
+            r.mode    = (uint8_t)(mode_id | 0x80);
+            r.payload = std::move(ctx);
+            return r;
+        }
     }
+    r.mode    = (uint8_t)mode_id;
+    r.payload = std::move(plain);
     return r;
 }
 

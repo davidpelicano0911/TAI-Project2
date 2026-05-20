@@ -4,7 +4,12 @@ Compressor/descompressor lossless para imagens astronómicas raw de 16 bits em b
 
 ## Compilar
 
-Executar `make` na diretoria `hais/`. Gera os binários `compress` e `decompress`.
+```
+cd hais/
+make
+```
+
+Gera os binários `compress` (56 KB) e `decompress` (27 KB).
 
 ## Utilização
 
@@ -13,110 +18,96 @@ Executar `make` na diretoria `hais/`. Gera os binários `compress` e `decompress
 ./decompress <input.hais> <output.raw>
 ```
 
-Se `width` e `height` não forem indicados, o compressor assume `1500 × 1500` (tamanho do benchmark `data2`). Para imagens com outras dimensões, os argumentos são obrigatórios.
-
-O compressor valida que `width × height × 2` corresponde ao tamanho real do ficheiro.
+Se `width` e `height` não forem indicados, as dimensões são inferidas a partir do tamanho do ficheiro (raiz quadrada, ou lista de larguras comuns). Para garantir dimensões corretas em imagens não quadradas, passar os argumentos explicitamente.
 
 ## Estratégia
 
-A imagem é dividida em blocos de **500 × 500** pixels. Cada bloco é comprimido de forma independente e em paralelo (`std::thread`). A descompressão é também paralela — o ficheiro é lido integralmente para memória, os offsets dos blocos são determinados numa passagem sequencial, e os blocos são descomprimidos em paralelo.
+A imagem é dividida em blocos. O tamanho de bloco é escolhido automaticamente: o maior valor ≤ 512 que divida exatamente `W` e `H` com pelo menos 4 blocos; se não existir, usa 256 (com blocos parciais). Para as imagens 1500×1500 do benchmark, o bloco é 500×500.
+
+Cada bloco é comprimido de forma independente e em paralelo (`std::thread`). A descompressão é também paralela: o ficheiro é lido integralmente para memória, os offsets dos blocos são determinados numa passagem sequencial, e os blocos são descomprimidos em paralelo.
 
 ### Seleção de modo por bloco
 
-Para cada bloco, o compressor testa 5 modos e escolhe o que minimiza o `byte_cost`:
+Para cada bloco, o compressor avalia 5 modos e escolhe o que minimiza o custo estimado:
 
 | Modo | Preditor | Overhead por bloco | Quando é escolhido |
 |------|----------|--------------------|--------------------|
-| 0 — raw       | nenhum                   | 0 B    | blocos com ruído puro, sem correlação espacial |
-| 1 — avg       | média de 3 vizinhos      | 0 B    | blocos planos com ruído residual de leitura |
-| 2 — LS        | regressão linear (W,N,NW)| 12 B   | blocos com gradientes suaves e estrutura linear |
-| 3 — mean      | média global da imagem   | 0 B    | imagens com fundo uniforme não-nulo |
-| 4 — LS+bias   | LS com bias (W,N,NW,1)   | 16 B   | blocos com offset DC significativo |
+| 0 — raw      | nenhum                        | 0 B   | blocos com ruído puro, sem correlação espacial |
+| 1 — avg      | média de W, N, NW             | 0 B   | blocos planos com ruído residual de leitura |
+| 3 — mean     | média global da imagem        | 0 B   | blocos com fundo uniforme não-nulo (pedestal de bias) |
+| 4 — LS+bias  | LS linear (W, N, NW, 1)       | 16 B  | blocos com gradiente suave e offset DC significativo |
+| 6 — LS+NN    | LS linear (W, N, NW, NE, NN)  | 20 B  | blocos com correlação vertical forte (duas linhas de contexto) |
 
-O critério de seleção é `byte_cost = H(hi8) + H(lo8)`, que estima diretamente o custo dos dois streams que o encoder vai pagar. O overhead em bytes dos modos LS e LS+bias é contabilizado antes da comparação.
+O critério de seleção é `byte_cost = H(hi8) + H(lo8)`, que estima o custo dos dois streams FSE. O overhead fixo em bytes dos modos LS é somado antes da comparação.
+
+Adicionalmente, o compressor testa sempre uma variante **Context FSE**: o stream `lo8` é dividido em dois sub-streams separados consoante `hi8 == 0` ou `hi8 ≠ 0`. Se esta variante resultar num payload menor, é preferida e sinalizada com o bit 7 do byte de modo.
 
 ### Preditores
 
-Os vizinhos causais são `A` (esquerda), `B` (cima) e `C` (diagonal cima-esquerda) — todos já reconstruídos no momento da previsão.
+Os vizinhos causais são `W` (esquerda), `N` (cima), `NW` (diagonal), `NE` (cima-direita) e `NN` (dois acima) — todos já reconstruídos no momento da previsão.
 
-**avg**: calcula `(A + B + C + 1) / 3`. Amortece o ruído de leitura em regiões planas, onde preditores extrapolativos amplificam pequenas flutuações.
+**avg**: `(W + N + NW + 1) / 3`. Amortece o ruído de leitura em regiões planas.
 
-**LS** (Least Squares per block): resolve localmente `min_w Σ(pixel − w·[A,B,C])²` usando todos os pixels interiores do bloco. Os pesos ótimos `w` são guardados no bitstream (3 × float32 = 12 bytes). O decoder lê os pesos e aplica a mesma predição linear, reproduzindo os resíduos exatos.
+**mean**: usa a média global de todos os pixels da imagem como preditor constante. A média é calculada uma vez e guardada no cabeçalho (2 bytes). Eficaz em imagens com pedestal de bias uniforme.
 
-**LS+bias**: igual ao LS mas com vetor de features `[A,B,C,1]`, adicionando um bias independente do contexto. Guarda 4 × float32 = 16 bytes. Útil quando o bloco tem um offset DC que não é capturado pelos vizinhos.
+**LS+bias** (modo 4): resolve `min_w Σ(pixel − w·[W, N, NW, 1])²` por Gauss-Jordan usando os pixels interiores do bloco. Os 4 pesos float32 (16 bytes) são guardados no bitstream e lidos pelo decoder.
 
-**mean**: usa a média global de todos os pixels da imagem como preditor constante. Elimina a maior parte da variância em imagens com fundo uniforme de intensidade não-nula (frequente em imagens astronómicas com pedestal de bias). A média global é calculada uma vez e guardada no cabeçalho (2 bytes).
+**LS+NN** (modo 6): igual mas com vetor `[W, N, NW, NE, NN]` — 5 pesos float32 = 20 bytes. Captura correlação vertical de segunda ordem (gradiente).
 
-O resíduo é codificado com mapeamento zigzag signed→unsigned: `v≥0 → 2v`, `v<0 → -2v-1`.
+O resíduo é codificado com mapeamento zigzag: `v ≥ 0 → 2v`, `v < 0 → −2v − 1`.
 
 ### Codificação entrópica: FSE/tANS
 
-Cada símbolo de 16 bits é separado em dois bytes (`hi8 = sym >> 8`, `lo8 = sym & 0xFF`) e cada stream é comprimido independentemente com **FSE/tANS** (Finite State Entropy / tabled ANS), implementado de raiz sem bibliotecas externas.
+Cada símbolo de 16 bits é separado em `hi8 = sym >> 8` e `lo8 = sym & 0xFF`. Cada stream é comprimido independentemente com **FSE/tANS** (Finite State Entropy / tabled ANS), implementado de raiz em C++ sem bibliotecas externas.
 
-A tabela FSE tem `SCALE = 2^12 = 4096` estados. As frequências dos 256 bytes são normalizadas para soma `SCALE`. O encoder processa os símbolos em ordem inversa e guarda os bits de transição; o payload começa com o estado final de 16 bits. O decoder reconstrói os símbolos em ordem normal a partir desse estado.
+A tabela FSE usa `SCALE = 2^16 = 65536` estados. As frequências dos 256 bytes são normalizadas para soma `SCALE`. A fórmula de distribuição dos símbolos na tabela (`step = (SCALE>>1) + (SCALE>>3) + 3`) é proveniente do trabalho de Yann Collet sobre FSE [1].
+
+O encoder processa os símbolos em ordem inversa e emite bits de transição; o decoder reconstrói os símbolos em ordem normal a partir do estado inicial (primeiros 2 bytes do stream).
 
 ### Formato das tabelas de frequência
 
 | Flag | Formato | Quando |
 |------|---------|--------|
-| `0x01..0xFE` | Sparse: `nnz × (sym:u8 + freq:u32le)` | 1 a 254 símbolos distintos |
-| `0x00` | Dense: `256 × u32le` | 255 símbolos distintos |
-| `0xFF` | Uniforme implícito | 256 símbolos distintos |
-
-O caso uniforme evita guardar 1024 bytes de tabela quando a distribuição é praticamente plana — comum no byte baixo de imagens com ruído de leitura.
+| `0x01` | Símbolo único: 1 byte de símbolo, sem bitstream | apenas 1 símbolo distinto |
+| `0x02..0xFE` | Sparse: `nnz × (sym:u8 + freq:u32le)` | 2 a 254 símbolos distintos |
+| `0x00` | Dense: `256 × u32le` | 255 ou 256 símbolos distintos |
 
 ## Formato do ficheiro
 
 ```
 Header (18 bytes):
   magic      : 4 B  — "HAIS"
-  width      : 4 B  — little-endian u32
-  height     : 4 B  — little-endian u32
-  block_size : 4 B  — little-endian u32
-  gmean      : 2 B  — little-endian u16, média global da imagem
+  width      : 4 B  — u32 little-endian
+  height     : 4 B  — u32 little-endian
+  block_size : 4 B  — u32 little-endian
+  gmean      : 2 B  — u16 little-endian, média global da imagem
 
-Por bloco (row-major):
-  mode       : 1 B
-  [pesos]    : 12 B se mode==2, 16 B se mode==4, 0 B caso contrário
-  stream hi8 : flag(1B) + table_data + size(8B) + bits
-  stream lo8 : flag(1B) + table_data + size(8B) + bits
+Por bloco (row-major, left-to-right top-to-bottom):
+  mode_byte  : 1 B  — bits [6:0] = modo (0/1/3/4/6), bit 7 = context FSE flag
+  [pesos]    : 16 B se modo==4, 20 B se modo==6, 0 B caso contrário
+  stream hi8 : flag(1B) + tabela + size(8B) + bits
+  stream lo8 ou [lo_zero + lo_nonzero] se context FSE
 ```
 
 Todos os inteiros multibyte são little-endian.
 
-## Paralelismo
-
-A compressão é paralela: um contador atómico distribui índices de blocos pelas threads disponíveis (`hardware_concurrency()`). A descompressão é também paralela: o ficheiro é lido para memória, os offsets de cada bloco são determinados sequencialmente, e os blocos são descomprimidos em paralelo com o mesmo mecanismo. A escrita final é sequencial para manter a ordem dos blocos.
-
 ## Resultados (benchmark `data2`, 8 imagens 1500×1500 u16be)
 
-| Imagem | HAIS (bpp) | Balanced (bpp) | zstd-19 (bpp) |
-|--------|-----------|----------------|---------------|
-| A      | 4.424     | 4.51           | —             |
-| B      | 3.266     | 3.33           | —             |
-| C      | 2.439     | 2.46           | —             |
-| D      | 2.747     | 2.72           | —             |
-| E      | 2.572     | 2.60           | —             |
-| F      | 6.152     | 6.21           | —             |
-| G      | 2.419     | 2.42           | —             |
-| H      | 3.314     | 3.27           | —             |
-| **Média** | **3.417** | **3.430**   | —             |
+| Imagem | HAIS | bzip2-9 | xz-9 | zstd-19 |
+|--------|------|---------|------|---------|
+| A | 4.39 | 4.62 | 4.93 | 5.46 |
+| B | 3.24 | 3.40 | 3.55 | 3.77 |
+| C | 2.43 | 2.59 | 2.61 | 2.74 |
+| D | 2.73 | 2.89 | 2.96 | 3.16 |
+| E | 2.56 | 2.71 | 2.76 | 2.91 |
+| F | 6.14 | 6.47 | 6.56 | 7.06 |
+| G | 2.41 | 2.54 | 2.56 | 2.71 |
+| H | 3.29 | 3.41 | 3.56 | 4.20 |
+| **Média** | **3.40** | **3.58** | **3.68** | **4.00** |
 
-Métrica: bits por byte do ficheiro original não-comprimido (`compressed_bytes × 8 / original_bytes`).
+Métrica: `compressed_bytes × 8 / original_bytes` (bits por byte do ficheiro original).
 
-## Diferenças face a abordagens existentes
+## Referências
 
-**Face ao JPEG-LS / LOCO-I:** o JPEG-LS usa o preditor MED com codificador Golomb-Rice adaptativo. O HAIS substitui o MED pelo avg (mais robusto a pixels isolados de alta intensidade sobre fundo escuro) e o Golomb-Rice pelo FSE/tANS, mais eficiente quando a distribuição dos resíduos não é Laplaciana.
-
-**Face ao Quintas-Torra 2026:** o paper usa preditores lineares ponderados treinados globalmente por dataset. O HAIS resolve o LS localmente por bloco sem fase de treino — os pesos são derivados do próprio bloco e guardados no bitstream. A seleção do preditor é feita por bloco com critério `byte_cost`, não globalmente.
-
-**Face a compressores genéricos (zstd, xz):** não exploram a estrutura espacial 2D. O HAIS aplica preditores causais que removem redundância espacial antes da codificação entrópica.
-
-**O que é próprio desta implementação:**
-- Preditor global_mean: elimina a variância de fundo em imagens com pedestal não-nulo, sem overhead por bloco
-- Seleção automática de 5 modos por bloco com critério `byte_cost = H(hi8) + H(lo8)`
-- LS per-block sem treino: pesos ótimos locais derivados de cada bloco, guardados no bitstream
-- LS+bias: acrescenta um termo de bias independente ao preditor linear
-- Split hi8/lo8: streams independentes com tabelas FSE adaptadas à sua distribuição
-- FSE/tANS implementado de raiz em C++, sem bibliotecas externas
-- Blocos 500×500 (divisor de 1500): sem blocos parciais no benchmark padrão, maximizando os dados de treino FSE por bloco
+[1] Y. Collet, "Finite State Entropy — a new entropy coder," 2013.
+    https://github.com/Cyan4973/FiniteStateEntropy
