@@ -4,7 +4,7 @@
 #include <cstring>
 #include <algorithm>
 
-static constexpr uint32_t SCALE_BITS = 12;
+static constexpr uint32_t SCALE_BITS = 16;
 static constexpr uint32_t SCALE      = 1u << SCALE_BITS;
 
 struct FseDecodeEntry {
