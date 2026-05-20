@@ -38,44 +38,6 @@ static void ls_solve(double XtX[N][N], double Xty[N], float w[N]) {
 }
 
 // ---------------------------------------------------------------------------
-// Mode 2 — LS(W, N, NW): fit 3 weights, return zigzag residuals.
-// ---------------------------------------------------------------------------
-
-static void ls_compute(const std::vector<uint16_t>& blk, int bw, int bh,
-                       float w[3], std::vector<uint16_t>& syms) {
-    double XtX[3][3] = {}, Xty[3] = {};
-    for (int y = 1; y < bh; y++)
-        for (int x = 1; x < bw; x++) {
-            double f[3] = { (double)blk[y*bw+(x-1)],
-                            (double)blk[(y-1)*bw+x],
-                            (double)blk[(y-1)*bw+(x-1)] };
-            double t = blk[y * bw + x];
-            for (int i = 0; i < 3; i++) {
-                for (int j = 0; j < 3; j++) XtX[i][j] += f[i] * f[j];
-                Xty[i] += f[i] * t;
-            }
-        }
-    ls_solve<3>(XtX, Xty, w);
-
-    syms.resize(bw * bh);
-    for (int y = 0; y < bh; y++)
-        for (int x = 0; x < bw; x++) {
-            int idx = y * bw + x;
-            uint16_t pred;
-            if (y == 0 && x == 0) pred = 0;
-            else if (y == 0)      pred = blk[x - 1];
-            else if (x == 0)      pred = blk[(y-1)*bw+x];
-            else {
-                float p = w[0]*blk[y*bw+(x-1)]
-                        + w[1]*blk[(y-1)*bw+x]
-                        + w[2]*blk[(y-1)*bw+(x-1)];
-                pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
-            }
-            syms[idx] = zigzag((int16_t)(blk[idx] - pred));
-        }
-}
-
-// ---------------------------------------------------------------------------
 // Mode 4 — LS+bias(W, N, NW, 1): fit 4 weights (bias term included).
 // ---------------------------------------------------------------------------
 
@@ -114,6 +76,53 @@ static void ls4_compute(const std::vector<uint16_t>& blk, int bw, int bh,
                         + w[1]*blk[(y-1)*bw+x]
                         + w[2]*blk[(y-1)*bw+(x-1)]
                         + w[3];
+                pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+            }
+            syms[idx] = zigzag((int16_t)(blk[idx] - pred));
+        }
+}
+
+// ---------------------------------------------------------------------------
+// Mode 6 — LS(W, N, NW, NE, NN): 5 spatial weights, +20 bytes overhead.
+// ---------------------------------------------------------------------------
+
+static void ls5_compute(const std::vector<uint16_t>& blk, int bw, int bh,
+                        float w[5], std::vector<uint16_t>& syms) {
+    double XtX[5][5] = {}, Xty[5] = {};
+    for (int y = 2; y < bh; y++)
+        for (int x = 1; x < bw; x++) {
+            double ne = (x < bw-1) ? (double)blk[(y-1)*bw+(x+1)] : (double)blk[(y-1)*bw+x];
+            double f[5] = { (double)blk[y*bw+(x-1)],
+                            (double)blk[(y-1)*bw+x],
+                            (double)blk[(y-1)*bw+(x-1)],
+                            ne,
+                            (double)blk[(y-2)*bw+x] };
+            double t = blk[y * bw + x];
+            for (int i = 0; i < 5; i++) {
+                for (int j = 0; j < 5; j++) XtX[i][j] += f[i] * f[j];
+                Xty[i] += f[i] * t;
+            }
+        }
+    ls_solve<5>(XtX, Xty, w);
+
+    syms.resize(bw * bh);
+    for (int y = 0; y < bh; y++)
+        for (int x = 0; x < bw; x++) {
+            int idx = y * bw + x;
+            uint16_t pred;
+            if (y == 0 && x == 0)  pred = 0;
+            else if (y == 0)       pred = blk[x - 1];
+            else if (x == 0)       pred = blk[(y-1)*bw + x];
+            else if (y == 1) {
+                float ne = (x < bw-1) ? (float)blk[(y-1)*bw+(x+1)] : (float)blk[(y-1)*bw+x];
+                float p = w[0]*blk[y*bw+(x-1)] + w[1]*blk[(y-1)*bw+x]
+                        + w[2]*blk[(y-1)*bw+(x-1)] + w[3]*ne;
+                pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+            } else {
+                float ne = (x < bw-1) ? (float)blk[(y-1)*bw+(x+1)] : (float)blk[(y-1)*bw+x];
+                float p = w[0]*blk[y*bw+(x-1)] + w[1]*blk[(y-1)*bw+x]
+                        + w[2]*blk[(y-1)*bw+(x-1)] + w[3]*ne
+                        + w[4]*blk[(y-2)*bw+x];
                 pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
             }
             syms[idx] = zigzag((int16_t)(blk[idx] - pred));

@@ -71,14 +71,19 @@ struct FseDecoder {
 // ---------------------------------------------------------------------------
 
 static void decode_stream(const uint8_t*& ptr, std::vector<uint8_t>& out, int n) {
-    FseTable tab;
     uint8_t flag = pget_u8(ptr);
-    if (flag == 0xFF) {
-        for (int i = 0; i < 256; i++) tab.freq[i] = SCALE / 256;
-    } else if (flag == 0) {
+
+    // Single-symbol: fill output with the stored symbol (flag=0x01, no bitstream).
+    if (flag == 0x01) {
+        out.assign(n, pget_u8(ptr));
+        return;
+    }
+
+    FseTable tab;
+    if (flag == 0) {
         for (int i = 0; i < 256; i++) tab.freq[i] = pget_u32le(ptr);
     } else {
-        int nnz = (int)flag;
+        int nnz = (int)flag;  // 0x02..0xFE
         for (int k = 0; k < nnz; k++) {
             uint8_t sym = pget_u8(ptr);
             tab.freq[sym] = pget_u32le(ptr);

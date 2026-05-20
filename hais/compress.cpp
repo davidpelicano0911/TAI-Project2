@@ -14,8 +14,7 @@
 #include "coder/FseEncoder.hpp"
 #include "model/CompressorModel.hpp"
 
-static constexpr uint8_t MAGIC[4]   = {'H', 'A', 'I', 'S'};
-static constexpr int     BLOCK_SIZE = 500;
+static constexpr uint8_t MAGIC[4] = {'H', 'A', 'I', 'S'};
 
 // ---------------------------------------------------------------------------
 // File write helpers
@@ -56,47 +55,72 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
             blk[y * bw + x] = image[gy * W + bx * bs + x];
     }
 
-    // Compute residuals for all 5 modes.
-    std::vector<uint16_t> s0, s1, s2, s3, s4;
-    float ls_w[3], ls4_w[4];
+    std::vector<uint16_t> s0, s1, s3, s4, s6;
+    float ls4_w[4], ls5_w[5];
 
-    make_syms(blk, 0, bw, bh, s0, gmean);   // raw
-    make_syms(blk, 1, bw, bh, s1, gmean);   // avg
-    ls_compute (blk, bw, bh, ls_w,  s2);    // LS(W,N,NW)
-    make_syms(blk, 3, bw, bh, s3, gmean);   // global_mean
-    ls4_compute(blk, bw, bh, ls4_w, s4);    // LS+bias(W,N,NW,1)
+    make_syms(blk, 0, bw, bh, s0, gmean);    // raw
+    make_syms(blk, 1, bw, bh, s1, gmean);    // avg
+    make_syms(blk, 3, bw, bh, s3, gmean);    // global_mean
+    ls4_compute(blk, bw, bh, ls4_w, s4);     // LS+bias(W,N,NW,1)
+    ls5_compute(blk, bw, bh, ls5_w, s6);     // LS(W,N,NW,NE,NN)
 
-    // Pick mode with lowest entropy cost (overhead for LS modes counted in bits).
-    const double ls_overhead  = (12.0 * 8.0) / npix;
     const double ls4_overhead = (16.0 * 8.0) / npix;
-    const std::vector<uint16_t>* sp[5] = {&s0, &s1, &s2, &s3, &s4};
-    double costs[5] = {
-        byte_cost(s0),
-        byte_cost(s1),
-        byte_cost(s2) + ls_overhead,
-        byte_cost(s3),
-        byte_cost(s4) + ls4_overhead,
+    const double ls5_overhead = (20.0 * 8.0) / npix;
+    struct Candidate { int mode; double cost; const std::vector<uint16_t>* syms; };
+    Candidate cands[5] = {
+        {0, byte_cost(s0),                 &s0},
+        {1, byte_cost(s1),                 &s1},
+        {3, byte_cost(s3),                 &s3},
+        {4, byte_cost(s4) + ls4_overhead,  &s4},
+        {6, byte_cost(s6) + ls5_overhead,  &s6},
     };
     int best = 0;
     for (int m = 1; m < 5; m++)
-        if (costs[m] < costs[best]) best = m;
+        if (cands[m].cost < cands[best].cost) best = m;
 
-    const auto& sbest = *sp[best];
+    const auto& sbest = *cands[best].syms;
+    int   mode_id     =  cands[best].mode;
     std::vector<uint8_t> hi(npix), lo(npix);
     for (int i = 0; i < npix; i++) { hi[i] = sbest[i] >> 8; lo[i] = sbest[i] & 0xFF; }
 
-    // Build payload: [weights if LS] [hi stream] [lo stream]
-    BlockResult r;
-    r.mode = (uint8_t)best;
-    if (best == 2) {
+    // Build weights header.
+    std::vector<uint8_t> whdr;
+    if (mode_id == 4) {
         uint32_t bits;
-        for (int i = 0; i < 3; i++) { memcpy(&bits, &ls_w[i], 4); bput32(r.payload, bits); }
-    } else if (best == 4) {
+        for (int i = 0; i < 4; i++) { memcpy(&bits, &ls4_w[i], 4); bput32(whdr, bits); }
+    } else if (mode_id == 6) {
         uint32_t bits;
-        for (int i = 0; i < 4; i++) { memcpy(&bits, &ls4_w[i], 4); bput32(r.payload, bits); }
+        for (int i = 0; i < 5; i++) { memcpy(&bits, &ls5_w[i], 4); bput32(whdr, bits); }
     }
-    encode_stream(r.payload, hi);
-    encode_stream(r.payload, lo);
+
+    // Build plain payload (2 streams: hi, lo).
+    std::vector<uint8_t> plain;
+    plain.insert(plain.end(), whdr.begin(), whdr.end());
+    encode_stream(plain, hi);
+    encode_stream(plain, lo);
+
+    // Build context payload (3 streams: hi, lo_zero, lo_nonzero).
+    // Split lo by whether hi==0 (small residual) or hi!=0 (large residual).
+    std::vector<uint8_t> lo_zero, lo_nonzero;
+    lo_zero.reserve(npix); lo_nonzero.reserve(npix);
+    for (int i = 0; i < npix; i++) {
+        if (hi[i] == 0) lo_zero.push_back(lo[i]);
+        else            lo_nonzero.push_back(lo[i]);
+    }
+    std::vector<uint8_t> ctx;
+    ctx.insert(ctx.end(), whdr.begin(), whdr.end());
+    encode_stream(ctx, hi);
+    encode_stream(ctx, lo_zero);
+    encode_stream(ctx, lo_nonzero);
+
+    BlockResult r;
+    if (ctx.size() < plain.size()) {
+        r.mode    = (uint8_t)(mode_id | 0x80);  // bit 7 = context FSE flag
+        r.payload = std::move(ctx);
+    } else {
+        r.mode    = (uint8_t)mode_id;
+        r.payload = std::move(plain);
+    }
     return r;
 }
 
@@ -203,10 +227,11 @@ int main(int argc, char* argv[]) {
     write_u32le(fout, (uint32_t)bs);
     write_u16le(fout, gmean);
 
-    int mode_count[5] = {};
+    int mode_count[7] = {}, ctx_count = 0;
     for (int idx = 0; idx < total; idx++) {
         const auto& r = results[idx];
-        mode_count[r.mode]++;
+        mode_count[r.mode & 0x7F]++;
+        if (r.mode & 0x80) ctx_count++;
         write_u8(fout, r.mode);
         fwrite(r.payload.data(), 1, r.payload.size(), fout);
     }
@@ -216,8 +241,9 @@ int main(int argc, char* argv[]) {
     FILE* ft = fopen(argv[2], "rb"); fseek(ft, 0, SEEK_END); long out_bytes = ftell(ft); fclose(ft);
     fprintf(stderr, "Dimensions: %dx%d  blocks: %dx%d (%d total)\n",
             W, H, blocks_x, blocks_y, total);
-    fprintf(stderr, "Modes: raw=%d  avg=%d  ls=%d  mean=%d  ls4=%d\n",
-            mode_count[0], mode_count[1], mode_count[2], mode_count[3], mode_count[4]);
+    fprintf(stderr, "Modes: raw=%d avg=%d mean=%d ls4=%d ls5=%d  ctx=%d/%d\n",
+            mode_count[0], mode_count[1], mode_count[3],
+            mode_count[4], mode_count[6], ctx_count, total);
     fprintf(stderr, "Compressed: %ld -> %ld bytes  (%.4f bits/byte)\n",
             in_bytes, out_bytes, out_bytes * 8.0 / in_bytes);
     return 0;

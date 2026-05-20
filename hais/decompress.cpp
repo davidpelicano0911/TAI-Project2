@@ -23,6 +23,7 @@ struct BlockTask {
     const uint8_t* ptr;
     int     mode, bw, bh;
     uint16_t gmean;
+    bool    ctx;  // true = context FSE (3 streams: hi, lo_zero, lo_nonzero)
 };
 
 static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) {
@@ -30,27 +31,39 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
     int             npix = task.bw * task.bh;
 
     // Read per-block LS weights if present.
-    float ls_w[3] = {}, ls4_w[4] = {};
-    if (task.mode == 2) {
-        for (int i = 0; i < 3; i++) {
-            uint32_t bits = pget_u32le(ptr);
-            memcpy(&ls_w[i], &bits, 4);
-        }
-    } else if (task.mode == 4) {
+    float ls4_w[4] = {}, ls5_w[5] = {};
+    if (task.mode == 4) {
         for (int i = 0; i < 4; i++) {
             uint32_t bits = pget_u32le(ptr);
             memcpy(&ls4_w[i], &bits, 4);
+        }
+    } else if (task.mode == 6) {
+        for (int i = 0; i < 5; i++) {
+            uint32_t bits = pget_u32le(ptr);
+            memcpy(&ls5_w[i], &bits, 4);
         }
     }
 
     // Decode hi8 and lo8 streams.
     std::vector<uint8_t> hi8, lo8;
     decode_stream(ptr, hi8, npix);
-    decode_stream(ptr, lo8, npix);
+    if (task.ctx) {
+        // Context FSE: 2 sub-streams for lo8 split by hi8==0 / hi8!=0.
+        int nzero = 0;
+        for (int i = 0; i < npix; i++) if (hi8[i] == 0) nzero++;
+        std::vector<uint8_t> lo_zero, lo_nonzero;
+        decode_stream(ptr, lo_zero,    nzero);
+        decode_stream(ptr, lo_nonzero, npix - nzero);
+        lo8.resize(npix);
+        int iz = 0, in = 0;
+        for (int i = 0; i < npix; i++)
+            lo8[i] = (hi8[i] == 0) ? lo_zero[iz++] : lo_nonzero[in++];
+    } else {
+        decode_stream(ptr, lo8, npix);
+    }
 
     // Reconstruct pixels.
     blk.resize(npix);
-    BiasState bs;
     for (int y = 0; y < task.bh; y++) {
         for (int x = 0; x < task.bw; x++) {
             int      idx = y * task.bw + x;
@@ -58,7 +71,6 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
             uint16_t pixel;
 
             if (task.mode == 0) {
-                // Raw mode: no predictor, no bias correction.
                 pixel = sym;
             } else {
                 // Compute base predictor.
@@ -70,21 +82,6 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
                 case 3:  // global_mean
                     pred = task.gmean;
                     break;
-                case 2: {  // LS(W, N, NW)
-                    if (y == 0 && x == 0)
-                        pred = 0;
-                    else if (y == 0)
-                        pred = blk[x - 1];
-                    else if (x == 0)
-                        pred = blk[(y-1)*task.bw+x];
-                    else {
-                        float p = ls_w[0]*blk[y*task.bw+(x-1)]
-                                + ls_w[1]*blk[(y-1)*task.bw+x]
-                                + ls_w[2]*blk[(y-1)*task.bw+(x-1)];
-                        pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
-                    }
-                    break;
-                }
                 case 4: {  // LS+bias(W, N, NW, 1)
                     if (y == 0 && x == 0)
                         pred = (uint16_t)std::max(0.0f, std::min(65535.0f, ls4_w[3] + 0.5f));
@@ -99,6 +96,27 @@ static void decompress_block(const BlockTask& task, std::vector<uint16_t>& blk) 
                                 + ls4_w[1]*blk[(y-1)*task.bw+x]
                                 + ls4_w[2]*blk[(y-1)*task.bw+(x-1)]
                                 + ls4_w[3];
+                        pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+                    }
+                    break;
+                }
+                case 6: {  // LS(W,N,NW,NE,NN)
+                    if (y == 0 && x == 0)
+                        pred = 0;
+                    else if (y == 0)
+                        pred = blk[x - 1];
+                    else if (x == 0)
+                        pred = blk[(y-1)*task.bw + x];
+                    else if (y == 1) {
+                        float ne = (x < task.bw-1) ? (float)blk[(y-1)*task.bw+(x+1)] : (float)blk[(y-1)*task.bw+x];
+                        float p = ls5_w[0]*blk[y*task.bw+(x-1)] + ls5_w[1]*blk[(y-1)*task.bw+x]
+                                + ls5_w[2]*blk[(y-1)*task.bw+(x-1)] + ls5_w[3]*ne;
+                        pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+                    } else {
+                        float ne = (x < task.bw-1) ? (float)blk[(y-1)*task.bw+(x+1)] : (float)blk[(y-1)*task.bw+x];
+                        float p = ls5_w[0]*blk[y*task.bw+(x-1)] + ls5_w[1]*blk[(y-1)*task.bw+x]
+                                + ls5_w[2]*blk[(y-1)*task.bw+(x-1)] + ls5_w[3]*ne
+                                + ls5_w[4]*blk[(y-2)*task.bw+x];
                         pred = (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
                     }
                     break;
@@ -156,23 +174,29 @@ int main(int argc, char* argv[]) {
             int idx = by * blocks_x + bx;
             int bw  = std::min((int)bs, (int)width  - bx * (int)bs);
             int bh  = std::min((int)bs, (int)height - by * (int)bs);
-            int mode = (int)pget_u8(p);
+            uint8_t raw_mode = pget_u8(p);
+            int mode = (int)(raw_mode & 0x7F);
+            bool ctx  = (raw_mode & 0x80) != 0;
 
-            tasks[idx]     = {p, mode, bw, bh, gmean};
+            tasks[idx]     = {p, mode, bw, bh, gmean, ctx};
             block_pos[idx] = {bx, by};
 
-            // Skip weights.
-            if      (mode == 2) p += 12;
-            else if (mode == 4) p += 16;
+            // Skip weights (use real mode without context flag).
+            if      (mode == 4) p += 16;
+            else if (mode == 6) p += 20;
 
-            // Skip 2 FSE streams.
-            for (int s = 0; s < 2; s++) {
+            // Skip FSE streams: 2 normally, 3 with context flag.
+            int nstreams = ctx ? 3 : 2;
+            for (int s = 0; s < nstreams; s++) {
                 uint8_t flag = pget_u8(p);
-                if      (flag == 0xFF) { /* uniform — no table bytes */ }
-                else if (flag == 0)    { p += 256 * 4; }
-                else                   { p += (int)flag * 5; }
-                uint64_t nbytes = pget_u64le(p);
-                p += nbytes;
+                if (flag == 0x01) {
+                    p += 1;  // single-symbol: just one sym byte, no bitstream
+                } else {
+                    if   (flag == 0) p += 256 * 4;   // dense: 256 × u32le
+                    else             p += (int)flag * 5;  // sparse: nnz × {sym,freq}
+                    uint64_t nbytes = pget_u64le(p);
+                    p += nbytes;
+                }
             }
         }
     }

@@ -92,9 +92,9 @@ struct FseEncoder {
 // Format: [flag:1B][table_data][size:8B][state:2B + bits]
 //
 // Flag values:
-//   0xFF          — uniform (all 256 symbols equifrequent)
 //   0x00          — dense  (256 × u32le frequencies)
-//   0x01..0xFE    — sparse (nnz × {sym:u8, freq:u32le})
+//   0x01          — single-symbol: just one sym byte, no table, no bitstream
+//   0x02..0xFE    — sparse (nnz × {sym:u8, freq:u32le}), nnz = flag
 // ---------------------------------------------------------------------------
 
 static void encode_stream(std::vector<uint8_t>& buf, const std::vector<uint8_t>& bytes) {
@@ -103,25 +103,29 @@ static void encode_stream(std::vector<uint8_t>& buf, const std::vector<uint8_t>&
     int nnz = 0;
     for (int i = 0; i < 256; i++) if (cnt[i]) nnz++;
 
+    // Single-symbol: no entropy needed, just store the symbol.
+    // Saves 13 bytes vs sparse-with-1-entry (no table, no bitstream, no nbytes).
+    if (nnz == 1) {
+        int sym = 0; while (!cnt[sym]) sym++;
+        bput8(buf, 0x01);
+        bput8(buf, (uint8_t)sym);
+        return;
+    }
+
     FseTable tab;
-    if (nnz == 256) {
-        for (int i = 0; i < 256; i++) tab.freq[i] = SCALE / 256;
-        tab.build();
-        bput8(buf, 0xFF);
-    } else {
-        fit_freqs(cnt, tab.freq);
-        tab.build();
-        if (nnz <= 254) {
-            bput8(buf, (uint8_t)nnz);
-            for (int i = 0; i < 256; i++) {
-                if (!tab.freq[i]) continue;
-                bput8(buf, (uint8_t)i);
-                bput32(buf, tab.freq[i]);
-            }
-        } else {
-            bput8(buf, 0);
-            for (int i = 0; i < 256; i++) bput32(buf, tab.freq[i]);
+    fit_freqs(cnt, tab.freq);
+    tab.build();
+    if (nnz <= 254) {
+        bput8(buf, (uint8_t)nnz);  // flag = nnz = 2..254 = 0x02..0xFE
+        for (int i = 0; i < 256; i++) {
+            if (!tab.freq[i]) continue;
+            bput8(buf, (uint8_t)i);
+            bput32(buf, tab.freq[i]);
         }
+    } else {
+        // Dense format for nnz=255 or nnz=256 — stores all 256 freqs.
+        bput8(buf, 0);
+        for (int i = 0; i < 256; i++) bput32(buf, tab.freq[i]);
     }
 
     FseEncoder enc;
