@@ -1,7 +1,5 @@
 # Large data files — not tracked by git
-data_paper/astronomical_data_raw.zip
-data_paper/astronomical_data_raw/
-data_paper/test_images/
+data_paper/
 
 # Build artefacts
 hais/compress
