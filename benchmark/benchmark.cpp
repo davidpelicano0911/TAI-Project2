@@ -118,6 +118,7 @@ static std::vector<Compressor> make_compressors(const std::string& /*tmp*/) {
         { "astra",   "../astra/compress {src} {dst} 2>/dev/null",  "../astra/decompress {src} {dst}", ".astr" },
         { "helix",   "../helix/compress {src} {dst} 2>/dev/null",  "../helix/decompress {src} {dst}", ".hlx" },
         { "hais",    "../hais/compress {src} {dst} 2>/dev/null",   "../hais/decompress {src} {dst}", ".hais" },
+        { "hais2",   "../hais2/compress {src} {dst} 2>/dev/null",  "../hais2/decompress {src} {dst}", ".hais2" },
         { "prism",   "../prism/compress {src} {dst} 2>/dev/null",  "../prism/decompress {src} {dst}", ".prism" },
         { "prism-block", "../prism_block/compress {src} {dst} 2>/dev/null", "../prism_block/decompress {src} {dst}", ".prismb" },
     };
