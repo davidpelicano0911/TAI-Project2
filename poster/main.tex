@@ -1,140 +1,358 @@
 \documentclass[a0paper,landscape]{baposter}
 
-\usepackage{lipsum}          % This is just for some blindtext
-
-\usepackage{relsize}	       % For \smaller
-\usepackage{url}			       % For \url
-\usepackage{epstopdf}	       % Included EPS files automatically converted to PDF to include with pdflatex
-\usepackage{multicol}        % Multi Columns
-
-\usepackage{amsmath,amssymb} % math
-\usepackage{natbib}
+\usepackage{relsize}
+\usepackage{url}
+\usepackage{multicol}
+\usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{enumitem}
+\usetikzlibrary{arrows.meta,positioning}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%% Utility functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\definecolor{uniblue}{RGB}{0,62,113}
+\definecolor{unilightblue}{RGB}{0,130,200}
+\definecolor{fastcol}{RGB}{0,150,80}
+\definecolor{midcol}{RGB}{180,100,0}
+\definecolor{bestcol}{RGB}{140,0,40}
 
-%%% Save space in lists. Use this after the opening of the list %%%%%%%%%%%%%%%%
-\renewcommand{\vec}[1]{\bm{#1}}
-\newcommand{\vnabla}{\vec{\nabla}}
+\setlength{\columnsep}{0.7em}
+\setlength{\columnseprule}{0pt}
 
-\renewcommand{\d}[1]{\text{d} #1}
-\newcommand{\dxx}{\,\text{d}\vec{x}}
-\newcommand{\dx}{\,\text{d}x}
-
-\newcommand{\diff}[2]{\frac{\text{d}#1}{\text{d}#2}}
-\newcommand{\idiff}[2]{\text{d}#1 / \text{d}#2}
-\newcommand{\pdiff}[2]{\frac{\partial #1}{\partial #2}}
-\newcommand{\pdifff}[2]{\frac{\partial^2 #1}{\partial #2^2}}
-\newcommand{\ipdiff}[2]{\partial #1 / \partial #2}
-\newcommand{\vdiff}[2]{\frac{\delta #1}{\delta #2}}
-\newcommand{\ivdiff}[2]{\delta #1 / \delta #2}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%% Document Start %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% compact list spacing
+\setlist[itemize]{leftmargin=1.15em,nosep}
+\setlist[enumerate]{leftmargin=1.35em,nosep}
+\newcommand{\compactlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\topsep}{1pt}}
+\newcommand{\tightsection}{\vspace{0.35em}}
 
 \begin{document}
 \typeout{Poster rendering started}
 
-%%% General Poster Settings %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%% Eye Catcher, Title, Authors and University Images %%%%%%%%%%%%%%%%%%%%%%
 \begin{poster}{
-  columns=3,
-	grid=false,
-	borderColor=uniblue,
-	headerColorOne=uniblue,
-	headerColorTwo=uniblue,
-	headerFontColor=white,
-  headerheight=14em,
-	boxColorOne=white,
-  boxpadding=1em,
-	headershape=rectangle,
-	headerfont=\Large\textsf,
-	textborder=none,
-	background=shadetb,
+  columns=4,
+  colspacing=0.55em,
+  grid=false,
+  borderColor=uniblue,
+  headerColorOne=uniblue,
+  headerColorTwo=uniblue,
+  headerFontColor=white,
+  headerheight=8.2em,
+  boxColorOne=white,
+  boxpadding=0.55em,
+  boxheaderheight=1.65em,
+  headershape=rectangle,
+  headerfont=\normalsize\textsf\textbf,
+  textfont=\small,
+  textborder=none,
+  background=plain,
   bgColorOne=white,
-  bgColorTwo=white,
-	headerborder=open,
+  headerborder=open,
   boxshade=plain,
   eyecatcher=false
 }
-%%% Eye Catcher %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+{}
+{\huge\textsf{\textbf{Domain-Specific Lossless Compression of 16-bit Astronomical Images}}}
 {
+  \vspace{0.15em}
+  \normalsize
+  Afonso Ferreira \quad Duarte Matos \quad Lucas Santos\\
+  \smaller Universidade de Aveiro --- Theory of Algorithmic Information, 2026
 }
-%%% Title %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-{\smaller This title is quite long as you can see}
-%%% Authors %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 {
-  \vspace{1em}
-  Max Mustermann\\
-	{\smaller max.mustermann@stud-mail.uni-wuerzburg.de}
-}
-%%% Logo %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-{\begin{minipage}{20.0em}
-    \includegraphics[height=6em]{logo-uni}
+  \begin{minipage}{14em}
+    \raggedleft\includegraphics[width=\linewidth]{logo-uni}
   \end{minipage}
 }
 
-%%% Hintergrund %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\headerbox{Hintergrund}{name=abstract,column=0,row=0}{
-\begin{multicols}{2} 
-  \lipsum[2-3]
-\end{multicols}
+%% =====================================================================
+%% BOX: Motivation
+%% =====================================================================
+\headerbox{\color{white}1.\ Motivation \& Problem}{name=motiv,column=0,row=0}{
+
+  Modern telescopes produce \textbf{16-bit raw image streams} where storage
+  and transmission bandwidth are critical.  General-purpose compressors
+  (gzip, xz, zstd) treat pixels as bytes, ignoring spatial structure.
+
+  \tightsection
+  \textbf{Our goal:} design lossless codecs that exploit the unique statistics
+  of astronomical imagery:
+
+  \smallskip
+  \begin{itemize}\compactlist
+    \item Smooth, near-uniform backgrounds (high spatial correlation)
+    \item Sparse bright point sources (sparse residuals)
+    \item 16-bit dynamic range --- byte-split creates correlated pairs
+    \item Fixed $1500\!\times\!1500$-pixel frames (repeatable block geometry)
+  \end{itemize}
+
+  \tightsection
+  \textbf{Design axes:} compression ratio $\leftrightarrow$ speed
+  $\leftrightarrow$ simplicity.  We present \textbf{three codecs} on this
+  Pareto frontier.
+
+  \tightsection
+  \begin{center}
+  \begin{tikzpicture}[scale=0.82,font=\small]
+    \draw[->,thick] (0,0) -- (5.0,0) node[right] {Speed};
+    \draw[->,thick] (0,0) -- (0,3.2) node[above] {Ratio};
+    \fill[fastcol]  (4.4,1.3) circle (5pt)  node[right,fastcol]  {\textbf{PRISM-B}};
+    \fill[midcol]   (2.6,2.45) circle (5pt) node[right,yshift=-4pt,midcol] {\textbf{HAIS}};
+    \fill[bestcol]  (2.35,2.75) circle (5pt) node[right,yshift=5pt,bestcol] {\textbf{HAIS2}};
+    \fill[gray]     (1.0,2.0) circle (4pt)  node[right,gray]     {\small xz};
+    \fill[gray]     (4.8,0.8) circle (4pt)  node[right,gray]     {\small zstd-1};
+    \fill[gray]     (3.5,1.0) circle (4pt)  node[right,gray]     {\small gzip};
+  \end{tikzpicture}
+  \end{center}
 }
 
-%%% Box 1 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\headerbox{Vorgehen}{name=box1,column=1,height=1}{
-  % two columns, see: https://tex.stackexchange.com/questions/112983/beamer-columns-environment-in-article-document
-  \begin{columns}
-    \column{0.5\textwidth}
-    \lipsum[1-1]
-    \column{0.5\textwidth}
-    \begin{itemize}
-      \item one
-      \item two
-      \item three
-      \item four
-    \end{itemize}
-  \end{columns}%
+%% =====================================================================
+%% BOX: Shared Pipeline
+%% =====================================================================
+\headerbox{\color{white}2.\ Common Architecture}{name=arch,column=0,below=motiv,above=bottom}{
 
-  \hhrule
-  
-  \lipsum[1]
-    
-}
-\headerbox{Meine Grafik 1}{name=graph1,column=0,below=abstract,above=bottom}{
-\begin{center}
-\includegraphics[width=0.9\textwidth]{ctc.pdf}    
-\end{center}
-}
+  All three codecs share a \textbf{predict-residualise-encode} pipeline:
 
+  \smallskip
+  \begin{center}
+  \begin{tikzpicture}[node distance=0.45cm,
+      box/.style={draw,rounded corners=3pt,fill=blue!8,
+                  minimum width=1.58cm,minimum height=0.62cm,
+                  align=center,font=\scriptsize}]
+    \node[box] (px)  {Raw pixel\\$p_{x,y}$};
+    \node[box,right=0.35cm of px] (pr) {Predictor\\$\hat{p}$};
+    \node[box,right=0.35cm of pr] (re) {Residual\\$r=p-\hat{p}$};
+    \node[box,right=0.35cm of re] (en) {Entropy\\coder};
+    \draw[->] (px) -- (pr);
+    \draw[->] (pr) -- (re);
+    \draw[->] (re) -- (en);
+  \end{tikzpicture}
+  \end{center}
 
-%%% Box 2 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\headerbox{Ergebnisse}{name=box2,column=2}{
-  \begin{equation*}
-    \int \vec{a} \cdot \vec{b} \dxx
-  \end{equation*}
-
-  \hhrule
-
-    \lipsum[2-3]
-    \citet{amor2004naive}
-  
-  \citet{optimization2014inc}
-  
-  \citet{hevner2010design}
+  \smallskip
+  Residuals are \textbf{zigzag-mapped} to non-negative integers and split into
+  a high byte (hi) and low byte (lo) before entropy coding.
+  The codecs differ in \emph{predictor} and \emph{entropy coder}.
 }
 
-%%% Box 3 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\headerbox{Literatur}{name=box3,column=2,above=bottom,below=box2}{
-\begingroup
-\renewcommand{\section}[2]{}%
-%\renewcommand{\chapter}[2]{}% for other classes
-\bibliography{references}
-\bibliographystyle{chicago}
-\endgroup
+%% =====================================================================
+%% BOX: PRISM-Block (fast)
+%% =====================================================================
+\headerbox{\color{white}3.\ PRISM-Block — Fast Codec}{name=prism,column=1,row=0}{
+
+  \textbf{Predictor — GAP (Gradient-Adaptive):}
+  {\small
+  \[
+    \hat{p}=\frac{(\delta_v+1)W+(\delta_h+1)N}{\delta_v+\delta_h+2},
+    \quad
+    \begin{gathered}
+      \delta_h=|W-NW|\\[-0.2em]
+      \delta_v=|N-NW|
+    \end{gathered}
+  \]
+  }
+  Uses only causal neighbours ($W$, $N$, $NW$), with edge cases biased toward
+  the stronger horizontal or vertical gradient.
+
+  \tightsection
+  \textbf{Entropy coder — Adaptive Range Coder:}
+  \begin{itemize}\compactlist
+    \item Fenwick-tree frequency model (256 symbols, rescales at $2^{16}$)
+    \item \textbf{9 contexts:} 1 for hi-byte; 8 for lo-byte conditioned on
+          local residual magnitude $m_W + m_N$
+    \item LZMA-style carry-propagation encoder
+  \end{itemize}
+
+  \tightsection
+  \textbf{Parallelism — Independent Row Blocks:}
+  \begin{itemize}\compactlist
+    \item Image split into 150-row horizontal bands
+    \item Each band encoded independently $\Rightarrow$ zero inter-thread sync
+    \item \texttt{std::thread} pool, as many threads as CPU cores
+  \end{itemize}
+
+  \tightsection
+  \textbf{Micro-optimisations:}
+  \begin{itemize}\compactlist
+    \item First-row and first-pixel cases peeled from inner loop
+    \item Context lookup via precomputed \texttt{LO\_CTX\_TAB[1024]}
+    \item Works on \emph{any} image dimensions via \texttt{infer\_dims()}
+  \end{itemize}
+
+  \tightsection
+  \begin{center}\small
+  \begin{tabular}{@{}lrr@{}}
+    \toprule
+    & \textbf{Compress} & \textbf{Decompress}\\
+    \midrule
+    Avg.\ time & \textbf{35\,ms} & \textbf{46\,ms}\\
+    Avg.\ ratio & 3.51\,b/B & ---\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+}
+
+%% =====================================================================
+%% BOX: HAIS2 (all-rounder)
+%% =====================================================================
+\headerbox{\color{white}4.\ HAIS2 — All-Rounder Codec}{name=hais,column=2,row=0}{
+
+  \textbf{Block-Adaptive Multi-Predictor:}\\
+  Each $\mathrm{BS}\!\times\!\mathrm{BS}$ block independently selects
+  the predictor with minimum estimated entropy:
+
+  \smallskip
+  \begin{center}\scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}clll@{}}
+    \toprule
+    Mode & Name & Predictor & Overhead\\
+    \midrule
+    0 & raw   & identity  & 0 B\\
+    1 & avg   & $(W+N+NW)/3$ & 0 B\\
+    3 & mean  & global mean $\mu$ & 0 B\\
+    4 & LS4   & LS$(W,N,NW,1)$ & 16 B\\
+    6 & LS5   & LS$(W,N,NW,NE,NN)$ & 20 B\\
+    9 & LS6   & LS$(W,N,NW,WW,NN,1)$ & 24 B\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+
+  \smallskip
+  LS weights are solved per block.  The estimator scores
+  $H(\mathrm{hi})+\frac{n_0}{N}H(\mathrm{lo}|h=0)+
+  \frac{n_1}{N}H(\mathrm{lo}|h>0)$.
+
+  \tightsection
+  \textbf{Entropy Coder — ANS/FSE:}
+  \begin{itemize}\compactlist
+    \item Static per-block frequency table (sparse: $5\!\times\!\mathrm{nnz}$ bytes,
+          dense: 1025 bytes)
+    \item Hi and lo streams encoded separately
+    \item Optional \emph{ctx} mode: lo split into $h\!=\!0$ / $h\!>\!0$ sub-streams
+  \end{itemize}
+
+  \tightsection
+  \textbf{Block size selection:} largest $\mathrm{BS}\!\leq\!512$ dividing both
+  $W$ and $H$ with $\geq\!4$ blocks.  For $1500\!\times\!1500$: $\mathrm{BS}=500$
+  (9 blocks).  Smaller blocks lose to FSE table overhead.
+
+  \tightsection
+  \textbf{Predictor distribution on test set:}
+  \begin{center}\scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}lcl@{}}
+    \toprule
+    File type & Winner & Notes\\
+    \midrule
+    Star field (A) & avg (9/9) & 4.39\,b/B\\
+    Smooth bg (C,D,G,H) & mean/LS6 & 2.41--2.73\,b/B\\
+    High contrast (F) & LS6 (9/9) & 6.11\,b/B\\
+    Sparse stars (E) & raw+mean & 2.57\,b/B\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+}
+
+%% =====================================================================
+%% BOX: HAIS2+ (in development)
+%% =====================================================================
+\headerbox{\color{white}5.\ HAIS2+ — Best Ratio (In Development)}{name=future,column=3,row=0}{
+
+  \textbf{Known residual gaps (from information theory analysis):}
+  \begin{itemize}\compactlist
+    \item File A: lag-1 autocorrelation of residuals after avg = \textbf{0.79}
+          (raw = 0.95), so spatial structure remains.
+    \item Hi/lo byte split overhead $\approx$ 22\,KB total across 8 files
+    \item File A: 8.77\,b/B achieved vs 8.70\,b/B theoretical
+  \end{itemize}
+
+  \tightsection
+  \textbf{Planned improvements:}
+  \begin{enumerate}\compactlist
+    \item \textbf{CALIC-style bias correction} --- per-context mean correction
+          before entropy coding.
+    \item \textbf{16-bit FSE table} for hi==0 blocks --- eliminates the
+          byte-split overhead for smooth regions.
+    \item \textbf{Adaptive LS predictor} --- online weight update using
+          running covariance.
+  \end{enumerate}
+
+  \tightsection
+  \textbf{Why not GAP or MED?} Analysis confirmed these never win on
+  this data: astronomical images are either smooth (mean/LS wins) or star-field
+  (avg wins).  Including them adds latency with zero gain.
+
+  \tightsection
+  \textbf{Current status:} bias correction prototype tested; results pending.
+  Expected gain: $\Delta \approx 0.02$--$0.05$\,b/B on star-field images.
+}
+
+%% =====================================================================
+%% BOX: Benchmark
+%% =====================================================================
+\headerbox{\color{white}6.\ Benchmark Results}{name=bench,column=1,below=prism,above=bottom,span=2}{
+
+  \textbf{8 test images, $1500\!\times\!1500$ pixels, 16-bit raw. Averages across all files.}
+
+  \smallskip
+  \begin{center}\scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    \textbf{Codec} & \textbf{Avg b/B} $\downarrow$ & \textbf{Compress} $\downarrow$ & \textbf{Decompress} $\downarrow$ & \textbf{Notes}\\
+    \midrule
+    gzip -6         & 4.376 & 473\,ms & 61\,ms  & General-purpose\\
+    bzip2 -9        & 3.579 & 394\,ms & 234\,ms & Block-BWT\\
+    xz -6           & 3.685 & 2458\,ms & 160\,ms & Best general ratio\\
+    zstd -1         & 4.488 & 27\,ms  & 15\,ms  & Speed reference\\
+    \midrule
+    \textcolor{fastcol}{\textbf{PRISM-Block}} & \textbf{3.510} & \textbf{35\,ms} & \textbf{46\,ms} & Fast adaptive RC\\
+    \textcolor{midcol}{\textbf{HAIS}}  & \textbf{3.400} & \textbf{89\,ms} & \textbf{98\,ms} & Block FSE\\
+    \textcolor{bestcol}{\textbf{HAIS2}}& \textbf{3.396} & \textbf{92\,ms} & \textbf{102\,ms}& LS6 + ctx estimator\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+
+  \smallskip
+  All three of our codecs outperform gzip and xz in \emph{both} ratio and speed.
+  HAIS2 beats bzip2 in ratio while being $4\!\times$ faster to compress and
+  $2.3\!\times$ faster to decompress.
+}
+
+%% =====================================================================
+%% BOX: Conclusions
+%% =====================================================================
+\headerbox{\color{white}7.\ Conclusions}{name=concl,column=3,below=future,above=bottom}{
+
+  \textbf{Key takeaways:}
+  \begin{itemize}\compactlist
+    \item Domain knowledge (spatial prediction, byte-split entropy) beats
+          general-purpose compressors by $0.2$--$1.0$\,b/B while running faster.
+    \item Predictor selection per block is the single highest-impact design
+          choice; LS6 dominates on smooth and gradient regions.
+    \item Residual autocorrelation (0.79 for star fields) remains the main
+          open challenge, targeted by HAIS2+.
+  \end{itemize}
+
+  \tightsection
+  \textbf{Recommendations by use case:}
+  \begin{center}\scriptsize
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Scenario} & \textbf{Codec}\\
+    \midrule
+    Real-time acquisition & PRISM-Block\\
+    Archival storage & HAIS2\\
+    Maximum ratio & HAIS2+ (dev) \\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+
+  \tightsection
+  \textbf{All code is original} (C++17, no third-party compression libraries).
+  Benchmark comparisons invoke external tools as separate processes.
 }
 
 \end{poster}

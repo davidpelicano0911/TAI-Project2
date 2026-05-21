@@ -301,25 +301,8 @@
 \usepackage{lmodern}
 \usepackage[lm]{sfmath}
 
-% Set Calibri as copy text font
+% Set default fonts (Calibri removed — not available without fontspec/xelatex)
 \usepackage{bm}  % bold stuff
-\usepackage{bbm} % bold stuff
-\usepackage{fontspec}
-
-\defaultfontfeatures{Renderer=Basic,Ligatures=TeX}
-\setmainfont[
-  Path           = fonts/,
-  BoldFont       = calibrib.ttf,
-  ItalicFont     = calibrii.ttf,
-  BoldItalicFont = calibriz.ttf]
-  {calibri.ttf}
-\setmonofont[
-  Scale          = 0.9,
-  Path           = fonts/,
-  BoldFont       = consolab.ttf,
-  ItalicFont     = consolai.ttf,
-  BoldItalicFont = consolaz.ttf]
-  {consola.ttf}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
