@@ -1,0 +1,42 @@
+\section{Discussion and Conclusion}
+\label{sec:discussion}
+
+\paragraph{Why domain-specific codecs win.}
+Generic compressors treat the input as a flat byte stream, so they can only
+exploit the local byte-level redundancy that survives big-endian packing.
+Both our codecs instead operate on 16-bit pixel values and exploit 2D spatial
+correlations before entropy coding, reducing residual entropy by roughly
+0.5--0.6\,bpp relative to zstd-19.
+
+\paragraph{Role of the predictor.}
+The predictor accounts for most of the gain. Mode~3 (global mean subtraction)
+alone removes the bias pedestal, which is the dominant low-frequency component
+in many telescope frames. The LS predictors (Modes~4 and~6) then capture
+local gradients without requiring external training data: weights are derived
+from the block itself and stored in 16--20\,B of per-block overhead.
+Across the eight test images HAIS selects Mode~4 or Mode~6 in the majority
+of blocks, confirming that least-squares adaptation yields a genuine gain over
+fixed predictors.
+
+\paragraph{FSE vs.\ range coding.}
+HAIS uses tANS with $2^{16}$ states and a static per-stream table; the table
+is transmitted in sparse format (typically $5$--$40$\,B) at negligible
+overhead. The range coder in prism-block adapts online and requires no
+transmitted table, making it simpler but slightly slower due to Fenwick-tree
+updates. Neither approach dominates the other: for this corpus the compression
+difference is small ($<$0.1\,bpp) while the range coder's adaptive model
+makes prism-block faster overall.
+
+\paragraph{Limitations.}
+The benchmark covers only 8 images from one training set; rankings may shift
+on other telescopes or detector configurations. Timings depend on the specific
+machine and a single run. The inference of image dimensions from file size is
+heuristic and may fail for non-standard formats.
+
+\paragraph{Conclusion.}
+Domain-specific predictive compression clearly outperforms general-purpose
+tools on raw astronomical imagery: our best codec (HAIS) achieves 3.40\,bpp
+vs.\ 4.00\,bpp for zstd-19, a 15\% reduction, while remaining $13\times$
+faster than xz. The choice of predictor per block is the dominant factor;
+the entropy coder (FSE or adaptive range) contributes relatively little once
+the residuals are well-predicted.

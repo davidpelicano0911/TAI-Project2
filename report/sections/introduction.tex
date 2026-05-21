@@ -1,0 +1,39 @@
+\section{Introduction}
+\label{sec:intro}
+
+Raw images produced by ground-based astronomical telescopes are large,
+structured numerical arrays. Each image in this study is a $1500\times1500$
+raster of unsigned 16-bit pixels stored in big-endian order, occupying
+4.5\,MB. These arrays are not photographs in the conventional sense: they
+contain a spatially smooth sky background, a constant bias pedestal added by
+the readout electronics, stars or other point sources, and shot noise that
+grows with signal intensity. This structure differs markedly from text,
+executables, or multimedia files, so general-purpose compressors such as
+\texttt{gzip} or \texttt{zstd} cannot exploit it.
+
+The spatial smoothness means that a pixel value is well predicted by its
+causal neighbours. The bias pedestal means that subtracting a global mean
+removes most of the DC component before entropy coding. These two
+observations motivate \emph{predictive} compression: encode the
+residual after prediction rather than the pixel itself, so that the residual
+distribution is narrower and the entropy is lower.
+
+We present two lossless compressors that exploit these properties, targeting
+distinct points on the speed--ratio trade-off:
+
+\begin{itemize}
+  \item \textbf{prism-block} applies a gradient-adjusted predictor (GAP) to
+    the full 16-bit value, codes the residual with a range coder driven by
+    eight context-conditioned adaptive models, and parallelises across
+    horizontal bands. It prioritises throughput.
+  \item \textbf{HAIS} divides the image into square blocks, selects the best
+    of five candidate predictors per block (including training-free
+    least-squares), splits residuals into independent byte streams, and codes
+    them with Finite State Entropy (FSE/tANS)~\cite{collet2013fse}. It
+    prioritises compression ratio.
+\end{itemize}
+
+Section~\ref{sec:codecs} describes both codecs in detail.
+Section~\ref{sec:setup} defines the experimental protocol.
+Section~\ref{sec:results} reports compression ratios and runtimes.
+Section~\ref{sec:discussion} draws conclusions.
