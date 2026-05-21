@@ -2,41 +2,50 @@
 \label{sec:discussion}
 
 \paragraph{Why domain-specific codecs win.}
-Generic compressors treat the input as a flat byte stream, so they can only
-exploit the local byte-level redundancy that survives big-endian packing.
-Both our codecs instead operate on 16-bit pixel values and exploit 2D spatial
-correlations before entropy coding, reducing residual entropy by roughly
-0.5--0.6\,bpp relative to zstd-19.
+Generic compressors operate on byte streams and therefore see the two bytes of
+each 16-bit pixel as unrelated. This breaks the spatial correlation that
+spans pixel boundaries in big-endian encoding. Our codecs operate on 16-bit
+values directly, predict each pixel from its decoded neighbours, and entropy-code
+only the residual. The result is a reduction of $0.49$--$0.60$\,bpp over
+zstd-19 depending on the codec, despite zstd-19 using a much slower,
+high-effort general-purpose optimiser.
 
 \paragraph{Role of the predictor.}
-The predictor accounts for most of the gain. Mode~3 (global mean subtraction)
-alone removes the bias pedestal, which is the dominant low-frequency component
-in many telescope frames. The LS predictors (Modes~4 and~6) then capture
-local gradients without requiring external training data: weights are derived
-from the block itself and stored in 16--20\,B of per-block overhead.
-Across the eight test images HAIS selects Mode~4 or Mode~6 in the majority
-of blocks, confirming that least-squares adaptation yields a genuine gain over
-fixed predictors.
+Mode selection on the eight benchmark images reveals that Mode~3 (global mean
+subtraction) is the most frequently chosen predictor, dominating on bias
+frames and flat fields where a near-constant DC offset accounts for most of
+the signal (images D, E, G, H). Mode~1 (three-neighbour average) prevails
+in smooth stellar backgrounds (image A). LS modes are selected only in
+image~F, which contains bright point sources and extended spatial gradients
+that exceed the three-neighbour context. This pattern confirms that the bias
+pedestal is the single most compressible feature of astronomical frames; the
+LS predictor adds value only when the residual spatial structure is
+non-trivial after DC removal.
 
-\paragraph{FSE vs.\ range coding.}
-HAIS uses tANS with $2^{16}$ states and a static per-stream table; the table
-is transmitted in sparse format (typically $5$--$40$\,B) at negligible
-overhead. The range coder in prism-block adapts online and requires no
-transmitted table, making it simpler but slightly slower due to Fenwick-tree
-updates. Neither approach dominates the other: for this corpus the compression
-difference is small ($<$0.1\,bpp) while the range coder's adaptive model
-makes prism-block faster overall.
+\paragraph{Entropy coding design.}
+Splitting 16-bit residuals into independent hi8 and lo8 streams is the key
+structural choice. After a good prediction, hi8 is near-uniform zero,
+yielding a near-zero-entropy stream (often a 2-byte single-symbol FSE packet);
+all useful variation is carried by lo8. The context FSE variant conditions
+lo8 on whether hi8 is zero, exploiting the bimodal structure of the lo8
+distribution. prism-block achieves the same effect via eight adaptive context
+models without transmitting a frequency table, trading $2.3\times$ speed for
+$0.11$\,bpp less compression compared to HAIS.
 
 \paragraph{Limitations.}
-The benchmark covers only 8 images from one training set; rankings may shift
-on other telescopes or detector configurations. Timings depend on the specific
-machine and a single run. The inference of image dimensions from file size is
-heuristic and may fail for non-standard formats.
+The corpus covers only 8 images from a single training set; rankings may
+shift on sensors with different noise characteristics or gain settings.
+Runtime measurements reflect a single wall-clock run on one machine and
+include process-launch overhead for the generic tools. The dimension-inference
+heuristic in HAIS may fail for non-standard sensor sizes; explicit
+width/height arguments bypass this limitation.
 
 \paragraph{Conclusion.}
-Domain-specific predictive compression clearly outperforms general-purpose
-tools on raw astronomical imagery: our best codec (HAIS) achieves 3.40\,bpp
-vs.\ 4.00\,bpp for zstd-19, a 15\% reduction, while remaining $13\times$
-faster than xz. The choice of predictor per block is the dominant factor;
-the entropy coder (FSE or adaptive range) contributes relatively little once
-the residuals are well-predicted.
+Specialised predictive compression outperforms general-purpose tools on raw
+astronomical imagery. HAIS achieves 3.40\,bpp versus 4.00\,bpp for zstd-19,
+a 15\% reduction, while remaining $14\times$ faster than xz-9. The dominant
+gain comes from the predictor: global mean removal alone handles most
+calibration frames; least-squares adaptation provides further gains on
+science images. The entropy coder contributes relatively little once residuals
+are well predicted. Completing and benchmarking the third codec is the
+immediate next step.

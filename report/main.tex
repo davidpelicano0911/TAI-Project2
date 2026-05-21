@@ -67,17 +67,20 @@
 
 \maketitle
 \begin{abstract}
-We present two lossless compressors tailored to raw 16-bit astronomical
-images ($1500\times1500$ pixels, big-endian) acquired by ground-based
-telescopes. \textbf{prism-block} applies a gradient-adjusted predictor and
-a context-adaptive range coder to horizontal image bands, achieving
-3.51\,bpp in $\sim$81\,ms per image. \textbf{HAIS} selects the best of five
-per-block predictors — including training-free least-squares — and codes
-residuals with Finite State Entropy (tANS)~\cite{collet2013fse}, reaching
-3.40\,bpp in $\sim$187\,ms. Both codecs outperform the best generic
-compressor (zstd-19 at 4.00\,bpp) by at least 0.49\,bpp while remaining
-faster than bzip2-9 and xz-9, and they lie on the Pareto frontier of the
-full benchmark.
+We present three lossless compressors for raw 16-bit astronomical images
+($1500\times1500$ pixels, big-endian), each targeting a distinct point on
+the speed--ratio trade-off. \textbf{prism-block} uses a gradient-adjusted
+predictor (GAP) and a context-adaptive range coder across parallel horizontal
+bands, reaching 3.51\,bpp in ${\sim}81$\,ms. \textbf{HAIS} selects the best
+of five per-block predictors — including training-free least-squares with up
+to five spatial taps — codes residuals with Finite State Entropy
+(tANS)~\cite{collet2013fse}, and optionally splits the low-byte stream by
+the high-byte context, achieving 3.40\,bpp in ${\sim}187$\,ms. A third
+compression-focused codec extends HAIS with a wider predictor context and a
+context-aware mode-selection cost; results are pending. Both completed codecs
+outperform the best generic compressor (zstd-19, 4.00\,bpp) by at least
+0.49\,bpp while remaining faster than bzip2-9 and xz-9, and they occupy
+non-dominated positions on the benchmark Pareto frontier.
 \end{abstract}
 
 \input{sections/introduction}

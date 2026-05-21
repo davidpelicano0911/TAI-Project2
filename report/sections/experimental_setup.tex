@@ -4,26 +4,31 @@
 \subsection{Dataset}
 The benchmark corpus consists of 8 raw astronomical images, each a
 $1500\times1500$ raster of unsigned 16-bit big-endian pixels (4.5\,MB per
-file). The images were acquired by different ground-based telescopes (VLT,
-TJO, GTC, INT, JKT, LCO, WHT) and span a variety of noise levels, bias
-pedestals, and spatial structures, including stellar fields and blank-sky
-frames.
+file, $2.25\times10^6$ pixels). The images were acquired by different
+ground-based telescopes (VLT, TJO, GTC, INT, JKT, LCO, WHT) and span a
+deliberate variety of image types: bias frames (near-constant DC pedestal),
+flat fields (smooth illumination gradients), and science frames (stellar
+fields, galaxies). This diversity ensures that no single predictor type
+dominates the results artificially.
 
 \subsection{Reference Compressors}
 We compare against the generic tools most commonly used for scientific data:
 \texttt{gzip} (levels 1, 6, 9), \texttt{bzip2} (levels 1, 9),
 \texttt{xz} (levels 1, 6, 9), and \texttt{zstd} (levels 1, 3, 9, 19).
-All are run without any pre-processing; the raw byte stream is passed directly.
-Among the repository-specific codecs we also include \texttt{prism} and
-\texttt{helix} for context.
+All are invoked on the raw byte stream without any pre-processing or
+endian conversion. Results from two repository-specific codecs
+(\texttt{prism} and \texttt{helix}) are included for context.
 
 \subsection{Evaluation Protocol}
-The primary metric is bits per byte:
+The primary metric is bits per byte of the original file:
 \[
   \text{bpp} = \frac{8 \times \text{compressed bytes}}{\text{original bytes}}.
 \]
-Timing (compress and decompress, wall-clock) is measured as a single run on a
-single machine. Losslessness is verified by a byte-exact comparison of the
-decompressed output with the original input file.
-All compressors run on the same machine; the benchmark binary launches each
-tool as a subprocess and records its elapsed time.
+For a 16-bit image, $\text{bpp} = \text{bits per pixel}/2$.
+Compression and decompression times are measured as wall-clock elapsed time
+for a single run on a single machine; all compressors run sequentially in
+the same benchmark process to avoid contention.
+Losslessness is verified by byte-exact comparison of the decompressed output
+against the original file; any mismatch disqualifies the result.
+Binary size constraints from the project specification are satisfied:
+compress $\le 5$\,MB, decompress $\le 1$\,MB.

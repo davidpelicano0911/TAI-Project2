@@ -1,115 +1,130 @@
 \section{Codec Design}
 \label{sec:codecs}
 
-Both codecs share the same high-level pipeline: read the raw big-endian
-16-bit image; apply a spatial predictor; zigzag-encode the signed residual
-$r = \text{pixel} - \text{pred}$ as an unsigned symbol $z = 2r$ if $r\ge0$,
-$z = -2r-1$ otherwise; entropy-code the result.
+All three codecs share the same high-level pipeline: parse the raw big-endian
+16-bit image; apply a spatial predictor $\hat{p}$; zigzag-encode the signed
+residual $r = \text{pixel} - \hat{p}$ as an unsigned symbol
+$z = 2r$ if $r\ge0$, $z = -2r-1$ otherwise; entropy-code the result.
+Zigzag maps small-magnitude residuals — which are the common case after a
+good prediction — to small unsigned integers, concentrating the symbol
+distribution near zero regardless of sign.
 
 % ── prism-block ───────────────────────────────────────────────────────────────
 \subsection{prism-block: Speed-Focused}
 \label{sec:speed}
 
-\paragraph{Image partitioning.}
-The image is split into horizontal bands of 150 rows. Bands are compressed
-independently in parallel, with each thread atomically claiming the next
-unclaimed band.
+\paragraph{Partitioning and parallelism.}
+The image is split into horizontal bands of 150 rows each (10 bands for
+$1500\times1500$). Bands are compressed independently; a shared
+\texttt{std::atomic<int>} counter distributes bands to threads via
+\texttt{fetch\_add}, achieving lock-free load balancing.
 
 \paragraph{Predictor.}
-Each pixel uses the \emph{Gradient-Adjusted Prediction} (GAP) function of
-its three causal neighbours: left ($W$), above ($N$), and above-left ($NW$).
-GAP estimates directional gradients $d_h = |W - NW|$ and $d_v = |N - NW|$.
-If the horizontal gradient dominates ($d_h > 2\,d_v$), the pixel above is
-used; if the vertical gradient dominates, the pixel to the left is used;
-otherwise a weighted blend is computed:
+Each pixel is predicted by the \emph{Gradient-Adjusted Prediction} (GAP)
+function of its three decoded neighbours: left ($W$), above ($N$),
+and above-left ($NW$). Horizontal and vertical gradients are estimated as
+$d_h = |W - NW|$ and $d_v = |N - NW|$. When one gradient dominates
+($d_h > 2d_v$ or $d_v > 2d_h$), the perpendicular neighbour is used
+directly; otherwise a gradient-weighted blend is computed and clamped:
 \[
-  \hat{p} = \operatorname{clamp}\!\left(\frac{(d_v+1)\,W + (d_h+1)\,N}{d_v+d_h+2},\;\min(W,N),\;\max(W,N)\right).
+  \hat{p} = \operatorname{clamp}\!\left(
+    \frac{(d_v+1)\,W + (d_h+1)\,N}{d_v+d_h+2},\;
+    \min(W,N),\;\max(W,N)\right).
 \]
+This predictor handles edges and flat regions without a mode switch.
 
 \paragraph{Entropy coding.}
-After zigzag encoding, the 16-bit symbol $z$ is split into a high byte
-$z_h = z \gg 8$ and a low byte $z_l = z\,\&\,0\!\mathrm{xFF}$.
-Both are coded with a \emph{range coder} (carry-based, 64-bit state) backed
-by adaptive Fenwick-tree frequency models.
-$z_h$ uses a single shared model; $z_l$ uses one of eight models selected by
-the context
+After zigzag encoding, each 16-bit symbol $z$ is split into
+$z_h = z \gg 8$ (high byte) and $z_l = z\;\&\;0\!\mathrm{xFF}$ (low byte).
+Both bytes are coded with a carry-based range coder backed by adaptive
+Fenwick-tree models. $z_h$ uses a single shared model.
+$z_l$ is conditioned on the magnitude of the two preceding residuals:
 \[
   c = \operatorname{bin}(|\hat{r}_W| + |\hat{r}_N|),
 \]
-where $\hat{r}_W, \hat{r}_N$ are the residuals of the left and upper pixel and
-the bins span the ranges $\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
+yielding eight context models whose bin boundaries are
+$\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
 \{33\text{--}64\},\{65\text{--}128\},\{129\text{--}512\},\{>512\}$.
-Each model halves all counts when the total reaches $2^{16}$, tracking
-distribution shifts within a band.
+Each model halves all counts when the running total reaches $2^{16}$,
+tracking distribution shifts adaptively within a band.
 
 % ── HAIS ──────────────────────────────────────────────────────────────────────
 \subsection{HAIS: Balanced}
 \label{sec:balanced}
 
-\subsubsection*{Block Selection}
-HAIS infers image dimensions from the file size (attempting the integer square
-root, then a list of common astronomical widths: 1500, 2048, 4096, \ldots).
+\subsubsection*{Dimension Inference and Block Selection}
+HAIS accepts optional width/height arguments; otherwise it infers dimensions
+from the file size by trying the integer square root first, then a list of
+common astronomical sensor widths (1500, 2048, 4096, \ldots).
 It then selects the largest block side $b\le512$ that divides both $W$ and $H$
-exactly while producing at least four blocks. For $1500\times1500$, this gives
-$b=500$ and a $3\times3$ grid of nine blocks.
+exactly and yields at least four blocks. For $1500\times1500$ this gives
+$b=500$, producing a $3\times3$ grid of nine blocks of 500$\times$500 pixels.
 
 \subsubsection*{Predictive Modes}
-For each block, HAIS evaluates five candidate predictors and picks the one with
-the lowest estimated entropy cost.
+For each block, HAIS evaluates five candidate predictors and retains the one
+with the lowest estimated coding cost (defined below).
 
 \begin{description}[leftmargin=2em, labelindent=0em]
-  \item[Mode~0 (raw)] Symbols are the raw pixel values; no prediction applied.
-  \item[Mode~1 (avg)] Prediction is the three-neighbour average
-    $\hat{p} = \lfloor(W + N + NW + 1)/3\rfloor$.
-  \item[Mode~3 (gmean)] Prediction is the global mean $\bar{g}$ of the entire
-    image, computed once before blocking. This single subtraction removes the
-    bias pedestal common in all frames.
-  \item[Mode~4 (LS-4)] Ordinary least-squares with four features
-    $(W, N, NW, 1)$, fit per block via Gauss-Jordan elimination.
-    The four float32 weights (16\,B) are stored in the block header.
-  \item[Mode~6 (LS-5)] Extends Mode~4 with north-east ($NE$) and two-rows-above
-    ($NN$) neighbours: features $(W, N, NW, NE, NN)$.
-    Five float32 weights (20\,B) are stored in the block header.
+  \item[Mode~0 (raw)] Symbols are raw pixel values; no prediction.
+  \item[Mode~1 (avg)] $\hat{p} = \lfloor(W + N + NW + 1)/3\rfloor$.
+  \item[Mode~3 (gmean)] $\hat{p} = \bar{g}$, the global image mean computed
+    once before blocking. Removes the bias pedestal in all frames.
+  \item[Mode~4 (LS-4)] OLS with features $(W, N, NW, 1)$ per block via
+    Gauss-Jordan; four float32 weights (16\,B) stored in the block header.
+  \item[Mode~6 (LS-5)] Extends Mode~4 with $NE$ and $NN$; five weights
+    (20\,B). Both LS modes use the block's own pixels — no external training.
 \end{description}
 
-Both LS modes derive their weights from the block itself — no training data or
-separate pass is required. The weight overhead is included in the mode
-selection cost:
+The mode selection criterion penalises stored weights:
 \[
-  \text{cost}_m = H(\text{hi}_8) + H(\text{lo}_8) + \frac{8\,\delta_m}{n_\text{pix}},
+  \text{cost}_m = H(\mathrm{hi}_8) + H(\mathrm{lo}_8)
+                + \frac{8\,\delta_m}{n_{\text{pix}}},
 \]
-where $H(\cdot)$ is the empirical byte entropy, $n_\text{pix}$ is the block
-pixel count, and $\delta_m \in \{0,0,0,16,20\}$ is the weight header size.
+where $H(\cdot)$ is empirical byte entropy and
+$\delta_m \in \{0,0,0,16,20\}$\,B is the weight header size.
 
 \subsubsection*{Entropy Coding: FSE/tANS}
 Residuals are split into a high-byte stream (\texttt{hi}) and a low-byte
 stream (\texttt{lo}), each coded independently with Finite State
 Entropy~\cite{collet2013fse}.
 
-The FSE table has $\text{SCALE}=2^{16}=65536$ states. Symbol frequencies are
-normalised to sum to SCALE and spread across states using Collet's
-deterministic formula with step $= (\text{SCALE}\gg1)+(\text{SCALE}\gg3)+3$.
-The encoder processes symbols in reverse order, emitting variable-length
-transition bits; the decoder reads the two-byte initial state and reconstructs
-symbols in the forward order.
+The FSE table has $\text{SCALE}=2^{16}=65536$ states. Raw symbol counts
+are normalised to sum to SCALE (with a minimum frequency of 1 for observed
+symbols) and spread deterministically using Collet's step formula:
+$\text{step} = (\text{SCALE}\gg1) + (\text{SCALE}\gg3) + 3$.
+The encoder processes symbols in reverse, emitting variable-length
+transition bits stored in a \texttt{BitWriter}; the decoder reads the
+two-byte final state and reconstructs symbols in forward order.
 
-The compressed stream header encodes the frequency table in one of three
-formats: \emph{single-symbol} (\texttt{0x01}, 2\,B total) when all values are
-identical; \emph{sparse} (\texttt{nnz} as flag byte followed by
-$\text{nnz}\times5$\,B symbol--freq pairs) for up to 254 distinct symbols;
-or \emph{dense} (\texttt{0x00} followed by $256\times4$\,B) otherwise.
+The frequency table is serialised in one of three compact formats:
+\emph{single-symbol} (flag \texttt{0x01}, 2\,B total) when all values are
+identical; \emph{sparse} (flag byte $= \text{nnz} \in [2,254]$, followed by
+$\text{nnz}\times5$\,B symbol--frequency pairs); or \emph{dense}
+(flag \texttt{0x00}, $256\times4$\,B) when all 255--256 symbols appear.
 
 \subsubsection*{Context FSE}
-When the fraction of zero high bytes in a block falls between 2\% and 98\%,
-HAIS additionally tries splitting \texttt{lo} into two conditional streams:
-$\texttt{lo\_zero}$ (lo bytes where $\text{hi}=0$) and $\texttt{lo\_nonzero}$
-(all others). The three-stream payload is used only if it is strictly smaller
-than the two-stream baseline. The high-byte stream is encoded once and reused
-in both variants, avoiding redundant computation. Bit~7 of the mode byte
-signals to the decompressor that the three-stream layout is active.
+Because the high byte of a small residual is almost always zero, the lo8
+distribution differs substantially depending on whether $\mathrm{hi}=0$.
+When the fraction of zero high bytes falls between 2\% and 98\%, HAIS
+builds two conditional lo8 streams — $\texttt{lo\_zero}$
+(pixels with $\mathrm{hi}=0$) and $\texttt{lo\_nonzero}$ — and uses the
+three-stream layout only if its compressed size is strictly smaller than the
+two-stream baseline. The high-byte stream is encoded once and shared between
+both candidate payloads. Bit~7 of the mode byte signals the active layout.
 
 \subsubsection*{Parallel Execution}
-Compression and decompression both use a thread pool backed by a single
-\texttt{std::atomic<int>} counter. Each thread atomically increments the
-counter with \texttt{fetch\_add} to claim the next block; no mutex is required
-because block results are written to pre-allocated slots.
+Blocks are dispatched to a thread pool via a single
+\texttt{std::atomic<int>} counter with \texttt{fetch\_add}, writing results
+into pre-allocated per-block slots with no mutex required.
+
+% ── Third codec ───────────────────────────────────────────────────────────────
+\subsection{[Third Codec]: Compression-Focused}
+\label{sec:compression}
+
+% TODO: fill in when the third codec is complete.
+% Key design points to describe:
+%   - Extended predictor context (e.g. 6-tap LS: W, N, NW, WW, NN, bias)
+%   - Context-cost mode selection: cost = H(hi) + H(lo|hi=0)*p0 + H(lo|hi≠0)*(1-p0)
+%     directly models the entropy of the three-stream layout
+%   - Incompatible file format (different magic bytes)
+%   - Same parallel execution model as HAIS

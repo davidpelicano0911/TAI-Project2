@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2025/dev/Debian) (preloaded format=pdflatex 2025.12.8)  21 MAY 2026 12:22
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2025/dev/Debian) (preloaded format=pdflatex 2025.12.8)  21 MAY 2026 17:42
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -996,69 +996,56 @@ File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 
 {/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texlive/texmf-di
 st/fonts/enc/dvips/base/8r.enc}]
-Underfull \hbox (badness 10000) in paragraph at lines 38--44
-\T1/ptm/m/n/10 where $[]\OML/cmm/m/it/10 ; []$ \T1/ptm/m/n/10 are the resid-u-a
-ls of the left and up-per pixel and the bins span the ranges
- []
-
-
-Underfull \hbox (badness 1661) in paragraph at lines 38--44
-\OMS/cmsy/m/n/10 f\OT1/cmr/m/n/10 0\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cm
-sy/m/n/10 f\OT1/cmr/m/n/10 1[]2\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cmsy/m
-/n/10 f\OT1/cmr/m/n/10 3[]8\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cmsy/m/n/1
-0 f\OT1/cmr/m/n/10 9[]32\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cmsy/m/n/10 f
-\OT1/cmr/m/n/10 33[]64\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cmsy/m/n/10 f\O
-T1/cmr/m/n/10 65[]128\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cmsy/m/n/10 f\OT
-1/cmr/m/n/10 129[]512\OMS/cmsy/m/n/10 g\OML/cmm/m/it/10 ; \OMS/cmsy/m/n/10 f\OM
-L/cmm/m/it/10 > \OT1/cmr/m/n/10 512\OMS/cmsy/m/n/10 g$\T1/ptm/m/n/10 . Each mod
-el halves all counts when the
- []
-
-
-Underfull \hbox (badness 6792) in paragraph at lines 70--73
-[]\T1/ptm/m/n/10 Extends Mode 4 with north-east ($\OML/cmm/m/it/10 NE$\T1/ptm/m
-/n/10 ) and two-rows-above ($\OML/cmm/m/it/10 NN$\T1/ptm/m/n/10 ) neigh-bours: 
-fea-tures
- []
-
-) (./sections/experimental_setup.tex
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.20 \subsection
-                {Evaluation Protocol}
+l.115 \subsubsection
+                    *{Parallel Execution}
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
 misspelled it (e.g., `\hobx'), type `I' and the correct
 spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
-[2]) (./sections/results.tex
-<../benchmark/results_plot.png, id=97, 638.8668pt x 389.2944pt>
+[2]) (./sections/experimental_setup.tex) (./sections/results.tex
+
+! Undefined control sequence.
+\f@nch@orh ->\scshape \footnotesize \headeright 
+                                                \strut 
+l.48 
+     
+The control sequence at the end of the top line
+of your error message was never \def'ed. If you have
+misspelled it (e.g., `\hobx'), type `I' and the correct
+spelling (e.g., `I\hbox'). Otherwise just continue,
+and I'll forget about whatever was undefined.
+
+[3]
+<../benchmark/results_plot.png, id=107, 638.8668pt x 389.2944pt>
 File: ../benchmark/results_plot.png Graphic file (type png)
 <use ../benchmark/results_plot.png>
-Package pdftex.def Info: ../benchmark/results_plot.png  used on input line 79.
+Package pdftex.def Info: ../benchmark/results_plot.png  used on input line 87.
 (pdftex.def)             Requested size: 459.99684pt x 280.30362pt.
 ) (./sections/discussion.tex
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.1 \section
-            {Discussion and Conclusion}
+l.13 \paragraph
+               {Role of the predictor.}
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
 misspelled it (e.g., `\hobx'), type `I' and the correct
 spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
-[3])
+[4 <../benchmark/results_plot.png>])
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.89 \newpage
+l.92 \newpage
              
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -1066,12 +1053,12 @@ misspelled it (e.g., `\hobx'), type `I' and the correct
 spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
-[4 <../benchmark/results_plot.png>]
+[5]
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.127 \end{document}
+l.130 \end{document}
                     
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -1079,22 +1066,26 @@ misspelled it (e.g., `\hobx'), type `I' and the correct
 spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
-[5] (./main.aux)
+[6] (./main.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 1A6636DDF4224DFFE4BFAA57B0B66BE5;1695.
+(rerunfilecheck)             Checksum: 6FDEBD0A008ADBD289D69BB1A43DE79E;1929.
  ) 
 Here is how much of TeX's memory you used:
- 28307 strings out of 475085
- 523170 string characters out of 5764176
- 1138737 words of memory out of 5000000
- 50797 multiletter control sequences out of 15000+600000
+ 28311 strings out of 475085
+ 523223 string characters out of 5764176
+ 1137737 words of memory out of 5000000
+ 50799 multiletter control sequences out of 15000+600000
  612265 words of font info for 87 fonts, out of 8000000 for 9000
  61 hyphenation exceptions out of 8191
- 84i,12n,87p,1001b,484s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,12n,87p,1001b,471s stack positions out of 10000i,1000n,20000p,200000b,200000s
  </home/tomasbras/.texlive2025/texmf-var/fonts/pk/ljfour/jknappen/ec/ectt0900
 .600pk> </home/tomasbras/.texlive2025/texmf-var/fonts/pk/ljfour/jknappen/ec/ect
 t1000.600pk></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmex1
@@ -1106,10 +1097,10 @@ xmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-di
 st/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/
 urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri
 8a.pfb>
-Output written on main.pdf (5 pages, 228195 bytes).
+Output written on main.pdf (6 pages, 232250 bytes).
 PDF statistics:
- 247 PDF objects out of 1000 (max. 8388607)
- 157 compressed objects within 2 object streams
- 41 named destinations out of 1000 (max. 500000)
- 12922 words of extra memory for PDF output out of 14400 (max. 10000000)
+ 259 PDF objects out of 1000 (max. 8388607)
+ 166 compressed objects within 2 object streams
+ 43 named destinations out of 1000 (max. 500000)
+ 12930 words of extra memory for PDF output out of 14400 (max. 10000000)
 
