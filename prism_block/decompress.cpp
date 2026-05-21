@@ -94,7 +94,7 @@ struct RangeDecoder {
     }
 
     uint8_t decode(AdaptModel& m) {
-        uint32_t r = range / m.total;
+        uint32_t r    = range / m.total;
         uint32_t slot = std::min(code / r, m.total - 1);
         uint32_t cumul = 0;
         uint8_t sym = m.find(slot, cumul);
@@ -132,16 +132,39 @@ static bool read_u64le(FILE* f, uint64_t& v) {
     return true;
 }
 
-static int lo_context(int mW, int mN) {
+static int LO_CTX_TAB[1024];
+static void build_lo_ctx_tab() {
+    for (int mg = 0; mg < 1024; mg++) {
+        if      (mg == 0)   LO_CTX_TAB[mg] = 0;
+        else if (mg <= 2)   LO_CTX_TAB[mg] = 1;
+        else if (mg <= 8)   LO_CTX_TAB[mg] = 2;
+        else if (mg <= 32)  LO_CTX_TAB[mg] = 3;
+        else if (mg <= 64)  LO_CTX_TAB[mg] = 4;
+        else if (mg <= 128) LO_CTX_TAB[mg] = 5;
+        else if (mg <= 512) LO_CTX_TAB[mg] = 6;
+        else                LO_CTX_TAB[mg] = 7;
+    }
+}
+
+static inline int lo_context(int mW, int mN) {
     int mg = mW + mN;
-    if      (mg == 0)   return 0;
-    else if (mg <= 2)   return 1;
-    else if (mg <= 8)   return 2;
-    else if (mg <= 32)  return 3;
-    else if (mg <= 64)  return 4;
-    else if (mg <= 128) return 5;
-    else if (mg <= 512) return 6;
-    else                return 7;
+    return LO_CTX_TAB[mg < 1024 ? mg : 1023];
+}
+
+static inline uint16_t decode_pixel(RangeDecoder& dec, AdaptModel& m_hi,
+                                     AdaptModel* m_lo,
+                                     uint16_t pred,
+                                     int16_t* curr_res, const int16_t* prev_res,
+                                     int gx, bool has_above) {
+    int mW = (gx > 0) ? std::abs((int)curr_res[gx - 1]) : 0;
+    int mN = has_above ? std::abs((int)prev_res[gx]) : 0;
+    uint8_t hi  = dec.decode(m_hi);
+    uint8_t lo  = dec.decode(m_lo[lo_context(mW, mN)]);
+    uint16_t zz = ((uint16_t)hi << 8) | lo;
+    uint16_t u  = zigzag_dec(zz);
+    int16_t res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
+    curr_res[gx] = res;
+    return (uint16_t)(pred + u);
 }
 
 static void decode_block(const Block& block, int width, std::vector<uint8_t>& output) {
@@ -157,34 +180,44 @@ static void decode_block(const Block& block, int width, std::vector<uint8_t>& ou
     dec.init(stream.data());
 
     std::vector<uint16_t> prev_img(width, 0), curr_img(width, 0);
-    std::vector<int16_t> prev_res(width, 0), curr_res(width, 0);
+    std::vector<int16_t>  prev_res(width, 0), curr_res(width, 0);
 
     for (uint32_t by = 0; by < block.rows; by++) {
         uint32_t gy = block.row0 + by;
+        bool has_above = (by > 0);
+        size_t row_off = (size_t)gy * width * 2;
+
+        // First pixel
+        {
+            uint16_t pred = (by == 0) ? 0u : prev_img[0];
+            curr_img[0] = decode_pixel(dec, m_hi, m_lo, pred,
+                                       curr_res.data(), prev_res.data(), 0, has_above);
+        }
+        // Rest of row
+        if (has_above) {
+            for (int gx = 1; gx < width; gx++) {
+                int W  = curr_img[gx - 1];
+                int N  = prev_img[gx];
+                int NW = prev_img[gx - 1];
+                curr_img[gx] = decode_pixel(dec, m_hi, m_lo,
+                                            gap_predict(W, N, NW),
+                                            curr_res.data(), prev_res.data(),
+                                            gx, true);
+            }
+        } else {
+            for (int gx = 1; gx < width; gx++) {
+                curr_img[gx] = decode_pixel(dec, m_hi, m_lo,
+                                            curr_img[gx - 1],
+                                            curr_res.data(), prev_res.data(),
+                                            gx, false);
+            }
+        }
+
+        // Write row to output (big-endian u16)
         for (int gx = 0; gx < width; gx++) {
-            int W  = (gx > 0)      ? curr_img[gx - 1] : 0;
-            int N  = (by > 0)      ? prev_img[gx] : W;
-            int NW = (by > 0 && gx > 0) ? prev_img[gx - 1] : W;
-
-            uint16_t pred = (by == 0 && gx == 0) ? 0u : gap_predict(W, N, NW);
-
-            int mW = (gx > 0) ? std::abs((int)curr_res[gx - 1]) : 0;
-            int mN = (by > 0) ? std::abs((int)prev_res[gx]) : 0;
-            int ctx = lo_context(mW, mN);
-
-            uint8_t hi = dec.decode(m_hi);
-            uint8_t lo = dec.decode(m_lo[ctx]);
-            uint16_t zz = ((uint16_t)hi << 8) | lo;
-            uint16_t u = zigzag_dec(zz);
-            int16_t res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
-            uint16_t pix = (uint16_t)(pred + u);
-
-            curr_res[gx] = res;
-            curr_img[gx] = pix;
-
-            size_t off = ((size_t)gy * width + (size_t)gx) * 2;
-            output[off] = (uint8_t)(pix >> 8);
-            output[off + 1] = (uint8_t)(pix & 0xFF);
+            uint16_t pix = curr_img[gx];
+            output[row_off + gx * 2]     = (uint8_t)(pix >> 8);
+            output[row_off + gx * 2 + 1] = (uint8_t)(pix & 0xFF);
         }
         prev_res.swap(curr_res);
         prev_img.swap(curr_img);
@@ -192,6 +225,7 @@ static void decode_block(const Block& block, int width, std::vector<uint8_t>& ou
 }
 
 int main(int argc, char* argv[]) {
+    build_lo_ctx_tab();
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <input.prismb> <output_raw>\n", argv[0]);
         return 1;

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -11,8 +12,6 @@
 #include <thread>
 #include <vector>
 
-static constexpr int WIDTH = 1500;
-static constexpr int HEIGHT = 1500;
 static constexpr int N_LO_CTX = 8;
 static constexpr int DEFAULT_BLOCK_ROWS = 150;
 static constexpr uint8_t MAGIC[4] = {'P','R','B','1'};
@@ -102,9 +101,9 @@ struct RangeEncoder {
     }
 
     void encode(AdaptModel& m, uint8_t sym) {
-        uint32_t r = range / m.total;
+        uint32_t r     = range / m.total;
         uint32_t cumul = m.prefix_less(sym);
-        low += (uint64_t)cumul * r;
+        low  += (uint64_t)cumul * r;
         range = (sym < 255) ? m.freq[sym] * r : range - cumul * r;
         while (range < (1u << 24)) { range <<= 8; shift(); }
         m.update(sym);
@@ -137,19 +136,45 @@ static void write_u64le(FILE* f, uint64_t v) {
     fwrite(b, 1, 8, f);
 }
 
-static int lo_context(int mW, int mN) {
-    int mg = mW + mN;
-    if      (mg == 0)   return 0;
-    else if (mg <= 2)   return 1;
-    else if (mg <= 8)   return 2;
-    else if (mg <= 32)  return 3;
-    else if (mg <= 64)  return 4;
-    else if (mg <= 128) return 5;
-    else if (mg <= 512) return 6;
-    else                return 7;
+// Lookup table: ctx = LO_CTX_TAB[min(mW+mN, 1023)]
+static int LO_CTX_TAB[1024];
+static void build_lo_ctx_tab() {
+    for (int mg = 0; mg < 1024; mg++) {
+        if      (mg == 0)   LO_CTX_TAB[mg] = 0;
+        else if (mg <= 2)   LO_CTX_TAB[mg] = 1;
+        else if (mg <= 8)   LO_CTX_TAB[mg] = 2;
+        else if (mg <= 32)  LO_CTX_TAB[mg] = 3;
+        else if (mg <= 64)  LO_CTX_TAB[mg] = 4;
+        else if (mg <= 128) LO_CTX_TAB[mg] = 5;
+        else if (mg <= 512) LO_CTX_TAB[mg] = 6;
+        else                LO_CTX_TAB[mg] = 7;
+    }
 }
 
-static Block encode_block(const std::vector<uint16_t>& image, int row0, int rows) {
+static inline int lo_context(int mW, int mN) {
+    int mg = mW + mN;
+    return LO_CTX_TAB[mg < 1024 ? mg : 1023];
+}
+
+static inline void encode_pixel(RangeEncoder& enc, AdaptModel& m_hi,
+                                 AdaptModel* m_lo,
+                                 uint16_t pix, uint16_t pred,
+                                 int16_t* curr_res, const int16_t* prev_res,
+                                 int gx, bool has_above) {
+    uint16_t u  = (uint16_t)(pix - pred);
+    uint16_t zz = zigzag_enc(u);
+    uint8_t  hi = (uint8_t)(zz >> 8);
+    uint8_t  lo = (uint8_t)(zz & 0xFF);
+    int16_t  res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
+    curr_res[gx] = res;
+    int mW = (gx > 0) ? std::abs((int)curr_res[gx - 1]) : 0;
+    int mN = has_above ? std::abs((int)prev_res[gx]) : 0;
+    enc.encode(m_hi, hi);
+    enc.encode(m_lo[lo_context(mW, mN)], lo);
+}
+
+static Block encode_block(const std::vector<uint16_t>& image,
+                          int width, int row0, int rows) {
     Block block;
     block.row0 = (uint32_t)row0;
     block.rows = (uint32_t)rows;
@@ -160,31 +185,39 @@ static Block encode_block(const std::vector<uint16_t>& image, int row0, int rows
     for (int c = 0; c < N_LO_CTX; c++) m_lo[c].init();
 
     RangeEncoder enc;
-    enc.out.reserve((size_t)rows * WIDTH);
-    std::vector<int16_t> prev_res(WIDTH, 0), curr_res(WIDTH, 0);
+    enc.out.reserve((size_t)rows * width * 5 / 4);
+
+    std::vector<int16_t> prev_res(width, 0), curr_res(width, 0);
 
     for (int by = 0; by < rows; by++) {
         int gy = row0 + by;
-        for (int gx = 0; gx < WIDTH; gx++) {
-            int W  = (gx > 0)      ? image[gy * WIDTH + gx - 1] : 0;
-            int N  = (by > 0)      ? image[(gy - 1) * WIDTH + gx] : W;
-            int NW = (by > 0 && gx > 0) ? image[(gy - 1) * WIDTH + gx - 1] : W;
+        const uint16_t* row  = image.data() + gy * width;
+        const uint16_t* prow = (by > 0) ? (image.data() + (gy - 1) * width) : nullptr;
+        bool has_above = (by > 0);
 
-            uint16_t pred = (by == 0 && gx == 0) ? 0u : gap_predict(W, N, NW);
-            uint16_t u = (uint16_t)(image[gy * WIDTH + gx] - pred);
-            uint16_t zz = zigzag_enc(u);
-            uint8_t hi = (uint8_t)(zz >> 8);
-            uint8_t lo = (uint8_t)(zz & 0xFF);
-
-            int16_t res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
-            curr_res[gx] = res;
-
-            int mW = (gx > 0) ? std::abs((int)curr_res[gx - 1]) : 0;
-            int mN = (by > 0) ? std::abs((int)prev_res[gx]) : 0;
-            int ctx = lo_context(mW, mN);
-
-            enc.encode(m_hi, hi);
-            enc.encode(m_lo[ctx], lo);
+        // First pixel of row: no left neighbor
+        {
+            int N = has_above ? (int)prow[0] : 0;
+            uint16_t pred = (by == 0) ? 0u : (uint16_t)N;
+            encode_pixel(enc, m_hi, m_lo, row[0], pred,
+                         curr_res.data(), prev_res.data(), 0, has_above);
+        }
+        // Rest of row: left neighbor always available
+        if (has_above) {
+            for (int gx = 1; gx < width; gx++) {
+                int W  = (int)row[gx - 1];
+                int N  = (int)prow[gx];
+                int NW = (int)prow[gx - 1];
+                encode_pixel(enc, m_hi, m_lo, row[gx],
+                             gap_predict(W, N, NW),
+                             curr_res.data(), prev_res.data(), gx, true);
+            }
+        } else {
+            for (int gx = 1; gx < width; gx++) {
+                encode_pixel(enc, m_hi, m_lo, row[gx],
+                             row[gx - 1],
+                             curr_res.data(), prev_res.data(), gx, false);
+            }
         }
         prev_res.swap(curr_res);
     }
@@ -194,9 +227,23 @@ static Block encode_block(const std::vector<uint16_t>& image, int row0, int rows
     return block;
 }
 
+// Infer dimensions from file size: try square root, then common widths, then Wx1.
+static bool infer_dims(long fsize, int& W, int& H) {
+    if (fsize <= 0 || fsize % 2 != 0) return false;
+    long npix = fsize / 2;
+    long sq = (long)std::sqrt((double)npix);
+    if (sq * sq == npix) { W = H = (int)sq; return true; }
+    for (int w : {4096, 3000, 2048, 2000, 1920, 1500, 1024, 512, 256}) {
+        if (npix % w == 0) { W = w; H = (int)(npix / w); return true; }
+    }
+    W = (int)npix; H = 1;
+    return true;
+}
+
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <input_raw> <output.prismb>\n", argv[0]);
+    build_lo_ctx_tab();
+    if (argc != 3 && argc != 5) {
+        fprintf(stderr, "Usage: %s <input_raw> <output.prismb> [width height]\n", argv[0]);
         return 1;
     }
 
@@ -206,28 +253,37 @@ int main(int argc, char* argv[]) {
     long fsize = ftell(fin);
     rewind(fin);
 
-    const int npix = WIDTH * HEIGHT;
-    if (fsize != (long)npix * 2) {
-        fprintf(stderr, "Unexpected file size %ld\n", fsize);
-        fclose(fin);
-        return 1;
+    int W, H;
+    if (argc == 5) {
+        W = std::atoi(argv[3]);
+        H = std::atoi(argv[4]);
+        if (W <= 0 || H <= 0) {
+            fprintf(stderr, "Invalid dimensions\n"); fclose(fin); return 1;
+        }
+        if (fsize != (long)W * H * 2) {
+            fprintf(stderr, "File size mismatch: got %ld, expected %d\n", fsize, W * H * 2);
+            fclose(fin); return 1;
+        }
+    } else {
+        if (!infer_dims(fsize, W, H)) {
+            fprintf(stderr, "Cannot infer dimensions from file size %ld\n", fsize);
+            fclose(fin); return 1;
+        }
     }
 
+    const int npix = W * H;
     std::vector<uint8_t> input((size_t)fsize);
     if (!read_exact(fin, input.data(), input.size())) {
-        fprintf(stderr, "Input read failed\n");
-        fclose(fin);
-        return 1;
+        fprintf(stderr, "Input read failed\n"); fclose(fin); return 1;
     }
     fclose(fin);
 
     std::vector<uint16_t> image(npix);
-    for (int i = 0; i < npix; i++) {
+    for (int i = 0; i < npix; i++)
         image[i] = (uint16_t)((input[(size_t)i * 2] << 8) | input[(size_t)i * 2 + 1]);
-    }
 
     const int block_rows = DEFAULT_BLOCK_ROWS;
-    const int nblocks = (HEIGHT + block_rows - 1) / block_rows;
+    const int nblocks = (H + block_rows - 1) / block_rows;
     std::vector<Block> blocks(nblocks);
 
     unsigned nth = std::thread::hardware_concurrency();
@@ -242,8 +298,8 @@ int main(int argc, char* argv[]) {
                 int b = next.fetch_add(1, std::memory_order_relaxed);
                 if (b >= nblocks) break;
                 int row0 = b * block_rows;
-                int rows = std::min(block_rows, HEIGHT - row0);
-                blocks[b] = encode_block(image, row0, rows);
+                int rows = std::min(block_rows, H - row0);
+                blocks[b] = encode_block(image, W, row0, rows);
             }
         });
     }
@@ -253,9 +309,9 @@ int main(int argc, char* argv[]) {
     if (!fout) { fprintf(stderr, "Cannot open output: %s\n", argv[2]); return 1; }
 
     fwrite(MAGIC, 1, 4, fout);
-    write_u32le(fout, WIDTH);
-    write_u32le(fout, HEIGHT);
-    write_u32le(fout, block_rows);
+    write_u32le(fout, (uint32_t)W);
+    write_u32le(fout, (uint32_t)H);
+    write_u32le(fout, (uint32_t)block_rows);
     write_u32le(fout, (uint32_t)nblocks);
     for (const Block& b : blocks) {
         write_u32le(fout, b.row0);
@@ -267,8 +323,8 @@ int main(int argc, char* argv[]) {
 
     uint64_t out_size = 20;
     for (const Block& b : blocks) out_size += 16 + b.payload.size();
-    fprintf(stderr, "Compressed: %ld -> %llu bytes (%.4f b/B), blocks=%d threads=%u\n",
-            fsize, (unsigned long long)out_size,
-            (double)out_size * 8.0 / fsize, nblocks, nth);
+    fprintf(stderr, "Dimensions: %dx%d  blocks=%d threads=%u\n", W, H, nblocks, nth);
+    fprintf(stderr, "Compressed: %ld -> %llu bytes (%.4f b/B)\n",
+            fsize, (unsigned long long)out_size, (double)out_size * 8.0 / fsize);
     return 0;
 }
