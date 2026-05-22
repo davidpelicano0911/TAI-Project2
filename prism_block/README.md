@@ -15,7 +15,7 @@ bounded memory, and robustness.
 
 ```bash
 make
-./compress   <input_raw>     <output.prismb>
+./compress   <n_rows> <n_cols> <input_raw>     <output.prismb>
 ./decompress <input.prismb>  <output_raw>
 make test
 ```

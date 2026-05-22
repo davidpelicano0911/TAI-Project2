@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2025/dev/Debian) (preloaded format=pdflatex 2025.12.8)  21 MAY 2026 17:42
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2025/dev/Debian) (preloaded format=pdflatex 2025.12.8)  22 MAY 2026 17:00
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1000,8 +1000,8 @@ st/fonts/enc/dvips/base/8r.enc}]
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.115 \subsubsection
-                    *{Parallel Execution}
+l.120 \subsection
+                 {[Third Codec]: Compression-Focused}
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
 misspelled it (e.g., `\hobx'), type `I' and the correct
@@ -1013,7 +1013,7 @@ and I'll forget about whatever was undefined.
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.48 
+l.70 
      
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -1022,7 +1022,7 @@ spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
 [3]
-<../benchmark/results_plot.png, id=107, 638.8668pt x 389.2944pt>
+<../benchmark/results_plot.png, id=108, 638.8668pt x 389.2944pt>
 File: ../benchmark/results_plot.png Graphic file (type png)
 <use ../benchmark/results_plot.png>
 Package pdftex.def Info: ../benchmark/results_plot.png  used on input line 87.
@@ -1032,8 +1032,8 @@ Package pdftex.def Info: ../benchmark/results_plot.png  used on input line 87.
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.13 \paragraph
-               {Role of the predictor.}
+l.25 \paragraph
+               {Entropy coding design.}
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
 misspelled it (e.g., `\hobx'), type `I' and the correct
@@ -1071,18 +1071,14 @@ and I'll forget about whatever was undefined.
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
 Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: 6FDEBD0A008ADBD289D69BB1A43DE79E;1929.
  ) 
 Here is how much of TeX's memory you used:
- 28311 strings out of 475085
- 523223 string characters out of 5764176
+ 28310 strings out of 475085
+ 523208 string characters out of 5764176
  1137737 words of memory out of 5000000
- 50799 multiletter control sequences out of 15000+600000
+ 50798 multiletter control sequences out of 15000+600000
  612265 words of font info for 87 fonts, out of 8000000 for 9000
  61 hyphenation exceptions out of 8191
  84i,12n,87p,1001b,471s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -1097,7 +1093,7 @@ xmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-di
 st/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/
 urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri
 8a.pfb>
-Output written on main.pdf (6 pages, 232250 bytes).
+Output written on main.pdf (6 pages, 232867 bytes).
 PDF statistics:
  259 PDF objects out of 1000 (max. 8388607)
  166 compressed objects within 2 object streams
