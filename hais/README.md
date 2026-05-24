@@ -14,11 +14,11 @@ Gera os binários `compress` (56 KB) e `decompress` (27 KB).
 ## Utilização
 
 ```
-./compress   <input.raw> <output.hais> [width height]
+./compress   <n_rows> <n_cols> <input.raw> <output.hais>
 ./decompress <input.hais> <output.raw>
 ```
 
-Se `width` e `height` não forem indicados, as dimensões são inferidas a partir do tamanho do ficheiro (raiz quadrada, ou lista de larguras comuns). Para garantir dimensões corretas em imagens não quadradas, passar os argumentos explicitamente.
+As dimensões são obrigatórias no encoder. O decoder lê as dimensões diretamente do cabeçalho do ficheiro `.hais`.
 
 ## Estratégia
 

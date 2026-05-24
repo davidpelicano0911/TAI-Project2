@@ -52,10 +52,9 @@ tracking distribution shifts adaptively within a band.
 \subsection{HAIS: Balanced}
 \label{sec:balanced}
 
-\subsubsection*{Dimension Inference and Block Selection}
-HAIS accepts optional width/height arguments; otherwise it infers dimensions
-from the file size by trying the integer square root first, then a list of
-common astronomical sensor widths (1500, 2048, 4096, \ldots).
+\subsubsection*{Block Selection}
+HAIS requires explicit $n\_rows$ and $n\_cols$ arguments, which are stored in
+the compressed header so the decoder needs no additional input.
 It then selects the largest block side $b\le512$ that divides both $W$ and $H$
 exactly and yields at least four blocks. For $1500\times1500$ this gives
 $b=500$, producing a $3\times3$ grid of nine blocks of 500$\times$500 pixels.
