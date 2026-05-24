@@ -120,6 +120,8 @@ static std::vector<Compressor> make_compressors(const std::string& /*tmp*/) {
         { "hais",    "../hais/compress {src} {dst} 2>/dev/null",   "../hais/decompress {src} {dst}", ".hais" },
         { "prism",   "../prism/compress {src} {dst} 2>/dev/null",  "../prism/decompress {src} {dst}", ".prism" },
         { "prism-block", "../prism_block/compress {src} {dst} 2>/dev/null", "../prism_block/decompress {src} {dst}", ".prismb" },
+        { "hais2", "../hais2/compress {src} {dst} 2>/dev/null", "../hais2/decompress {src} {dst}", ".hais2" },
+        { "apex",    "../apex/compress {src} {dst} 2>/dev/null",   "../apex/decompress {src} {dst}", ".apex" },
     };
 }
 
