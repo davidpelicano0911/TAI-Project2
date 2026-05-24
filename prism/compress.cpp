@@ -185,13 +185,14 @@ static bool read_exact(FILE* f, void* data, size_t n) {
 // Main compress
 // ---------------------------------------------------------------------------
 
-static int compress(const char* in_path, const char* out_path) {
+static int compress(int H, int W, const char* in_path, const char* out_path) {
     FILE* fin = fopen(in_path, "rb");
     if (!fin) { fprintf(stderr, "Cannot open input: %s\n", in_path); return 1; }
     fseek(fin, 0, SEEK_END); long fsize = ftell(fin); rewind(fin);
-    int npix = WIDTH * HEIGHT;
+    int npix = W * H;
     if (fsize != (long)npix * 2) {
-        fprintf(stderr, "Unexpected file size %ld\n", fsize); fclose(fin); return 1;
+        fprintf(stderr, "File size mismatch: got %ld, expected %ld\n", fsize, (long)npix * 2);
+        fclose(fin); return 1;
     }
     std::vector<uint8_t> input((size_t)fsize);
     if (!read_exact(fin, input.data(), input.size())) {
@@ -206,23 +207,22 @@ static int compress(const char* in_path, const char* out_path) {
         image[i] = (uint16_t)((input[(size_t)i * 2] << 8) | input[(size_t)i * 2 + 1]);
     }
 
-    // Adaptive models: 1 hi + N_LO_CTX lo
     AdaptModel m_hi;
     m_hi.init();
     AdaptModel m_lo[N_LO_CTX];
     for (int c = 0; c < N_LO_CTX; c++) m_lo[c].init();
 
     RangeEncoder enc;
-    std::vector<int16_t> prev_res(WIDTH, 0), curr_res(WIDTH, 0);
+    std::vector<int16_t> prev_res(W, 0), curr_res(W, 0);
 
-    for (int gy = 0; gy < HEIGHT; gy++) {
-        for (int gx = 0; gx < WIDTH; gx++) {
-            int W  = (gx > 0)           ? image[gy*WIDTH+gx-1]     : 0;
-            int N  = (gy > 0)           ? image[(gy-1)*WIDTH+gx]   : W;
-            int NW = (gy > 0 && gx > 0) ? image[(gy-1)*WIDTH+gx-1] : W;
+    for (int gy = 0; gy < H; gy++) {
+        for (int gx = 0; gx < W; gx++) {
+            int Wp  = (gx > 0)           ? image[gy*W+gx-1]     : 0;
+            int N  = (gy > 0)           ? image[(gy-1)*W+gx]   : Wp;
+            int NW = (gy > 0 && gx > 0) ? image[(gy-1)*W+gx-1] : Wp;
 
-            uint16_t pred = (gy == 0 && gx == 0) ? 0u : gap_predict(W, N, NW);
-            uint16_t u    = (uint16_t)(image[gy*WIDTH+gx] - pred);
+            uint16_t pred = (gy == 0 && gx == 0) ? 0u : gap_predict(Wp, N, NW);
+            uint16_t u    = (uint16_t)(image[gy*W+gx] - pred);
             uint16_t zz   = zigzag_enc(u);
             uint8_t  hi   = (uint8_t)(zz >> 8);
             uint8_t  lo   = (uint8_t)(zz & 0xFF);
@@ -230,7 +230,6 @@ static int compress(const char* in_path, const char* out_path) {
             int16_t res = (u <= 32767u) ? (int16_t)u : (int16_t)((int)u - 65536);
             curr_res[gx] = res;
 
-            // Context for lo byte
             int mW = (gx > 0) ? std::abs((int)curr_res[gx-1]) : 0;
             int mN = (gy > 0) ? std::abs((int)prev_res[gx]) : 0;
             int mg = mW + mN;
@@ -244,7 +243,7 @@ static int compress(const char* in_path, const char* out_path) {
             else if (mg <= 512) ctx = 6;
             else                ctx = 7;
 
-            enc.encode(m_hi,     hi);
+            enc.encode(m_hi,      hi);
             enc.encode(m_lo[ctx], lo);
         }
         prev_res.swap(curr_res);
@@ -255,8 +254,8 @@ static int compress(const char* in_path, const char* out_path) {
     if (!fout) { fprintf(stderr, "Cannot open output: %s\n", out_path); return 1; }
 
     fwrite(MAGIC, 1, 4, fout);
-    write_u32le(fout, (uint32_t)WIDTH);
-    write_u32le(fout, (uint32_t)HEIGHT);
+    write_u32le(fout, (uint32_t)W);
+    write_u32le(fout, (uint32_t)H);
     write_u32le(fout, (uint32_t)N_LO_CTX);
     fwrite(enc.out.data(), 1, enc.out.size(), fout);
     fclose(fout);
@@ -268,6 +267,9 @@ static int compress(const char* in_path, const char* out_path) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) { fprintf(stderr, "Usage: %s <input> <output.prism>\n", argv[0]); return 1; }
-    return compress(argv[1], argv[2]);
+    if (argc != 5) { fprintf(stderr, "Usage: %s <n_rows> <n_cols> <input> <output.prism>\n", argv[0]); return 1; }
+    int H = std::atoi(argv[1]);
+    int W = std::atoi(argv[2]);
+    if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); return 1; }
+    return compress(H, W, argv[3], argv[4]);
 }
