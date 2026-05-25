@@ -11,15 +11,16 @@ $0.87$--$1.01$\,bpp over gzip-6 depending on the codec.
 \paragraph{Role of the predictor.}
 The predictor is the dominant design choice. Table~\ref{tab:modes} shows
 the per-block mode selection produced by all-rounder on each benchmark image.
-Mode~3 (gmean) dominates on six of eight images: it is the sole predictor for
-images D and H (bias frames with a near-constant DC pedestal) and the majority
-predictor for B, E, G. Image~A, a smooth stellar background, is handled
-entirely by Mode~1 (avg), which better tracks slowly varying spatial gradients.
-Image~F is the exception: a science frame containing bright point sources and
-extended emission, where LS-4 and LS-5 account for all nine blocks, yielding
-the largest per-image gain over generics ($0.33$\,bpp over bzip2-9). Image~C
-uses Mode~0 (raw) on six blocks, suggesting that dark calibration frames with
-dominant Poisson noise lose spatial correlation at block scale.
+Mode~3 (gmean) dominates on four of eight images: it is the sole predictor
+for images D and H (bias frames with a near-constant DC pedestal) and the
+majority predictor for E and G. Images A and B, which have smooth or
+mixed stellar backgrounds, are handled by Mode~1 (avg), which better tracks
+slowly varying spatial gradients. Image~F is the exception: a science frame
+containing bright point sources and extended emission, where LS-4 and LS-5
+account for all nine blocks, yielding the largest per-image gain over generics
+($0.33$\,bpp over bzip2-9 for all-rounder). Image~C uses Mode~0 (raw) on six
+blocks, suggesting that dark calibration frames with dominant Poisson noise
+lose spatial correlation at block scale.
 Quantitatively, prediction accounts for $0.67$\,bpp of the $0.78$\,bpp gain
 over zstd-9 (comparing speed-focused, which applies prediction, against
 zstd-9); the remaining $0.11$\,bpp comes from FSE versus the adaptive range
@@ -52,7 +53,7 @@ Splitting residuals into independent hi8 and lo8 streams is the key structural
 choice: after a good prediction, hi8 is near-uniformly zero and often compressed
 to a 2-byte FSE packet. speed-focused achieves the same effect through eight
 adaptive context models without transmitting a frequency table, trading
-$0.11$\,bpp for a $2\times$ speed gain over all-rounder. compression-focused's
+$0.11$\,bpp for a ${\sim}2\times$ speed gain over all-rounder (49 vs 96\,ms). compression-focused's
 exhaustive $10\times6$ search recovers only $0.03$\,bpp over all-rounder, confirming
 that predictor quality is the binding constraint.
 

@@ -5,12 +5,12 @@ All three codecs share the same high-level pipeline: parse the raw big-endian
 16-bit image; apply a spatial predictor $\hat{p}$; zigzag-encode the signed
 residual $r = \text{pixel} - \hat{p}$ as an unsigned symbol
 $z = 2r$ if $r\ge0$, $z = -2r-1$ otherwise; entropy-code the result.
-Zigzag maps small-magnitude residuals — which are the common case after a
-good prediction — to small unsigned integers, concentrating the symbol
+Zigzag maps small-magnitude residuals (the common case after a
+good prediction) to small unsigned integers, concentrating the symbol
 distribution near zero regardless of sign.
 
 % ── speed-focused ───────────────────────────────────────────────────────────────
-\subsection{speed-focused: Speed-Focused}
+\subsection{speed-focused}
 \label{sec:speed}
 
 The design of speed-focused centres on one principle: every horizontal strip of
@@ -49,8 +49,8 @@ with bin boundaries $\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
 Each model halves all counts when the running total reaches $2^{16}$, keeping
 the frequency estimates responsive to distribution shifts within a strip.
 
-% ── HAIS ──────────────────────────────────────────────────────────────────────
-\subsection{all-rounder: Balanced}
+% ── all-rounder ───────────────────────────────────────────────────────────────
+\subsection{all-rounder}
 \label{sec:balanced}
 
 \subsubsection*{Block Selection}
@@ -110,8 +110,8 @@ $\text{nnz}\times5$\,B symbol--frequency pairs); or \emph{dense}
 Because the high byte of a small residual is almost always zero, the lo8
 distribution differs substantially depending on whether $\mathrm{hi}=0$.
 When the fraction of zero high bytes falls between 2\% and 98\%, all-rounder
-builds two conditional lo8 streams — $\texttt{lo\_zero}$
-(pixels with $\mathrm{hi}=0$) and $\texttt{lo\_nonzero}$ — and uses the
+builds two conditional lo8 streams: \texttt{lo\_zero}
+(pixels with $\mathrm{hi}=0$) and \texttt{lo\_nonzero}, and uses the
 three-stream layout only if its compressed size is strictly smaller than the
 two-stream baseline. The high-byte stream is encoded once and shared between
 both candidate payloads. Bit~7 of the mode byte signals the active layout.
@@ -122,7 +122,7 @@ Blocks are dispatched to a thread pool via a single
 into pre-allocated per-block slots with no mutex required.
 
 % ── compression-focused ──────────────────────────────────────────────────────
-\subsection{compression-focused: Compression Focused}
+\subsection{compression-focused}
 \label{sec:compression}
 
 compression-focused separates orchestration from compression. The outer \texttt{compress}

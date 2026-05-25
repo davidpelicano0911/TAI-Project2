@@ -71,14 +71,14 @@ We present three lossless compressors for raw 16-bit astronomical images,
 each targeting a distinct point on the speed--ratio trade-off.
 \textbf{speed-focused} applies a gradient-adjusted predictor (GAP) over
 parallel horizontal strips and codes residuals with a context-adaptive range
-coder, reaching 3.505\,bpp in 47\,ms total.
+coder, reaching 3.505\,bpp in 49\,ms total.
 \textbf{all-rounder} selects the best of five per-block predictors
 (including training-free least-squares with up to five spatial taps) and
 codes residuals with Finite State Entropy (tANS), achieving 3.400\,bpp in
-102\,ms.
-\textbf{compression-focused} extends all-rounder with a six-tap
-least-squares predictor and a context-aware cost estimator, reaching
-3.367\,bpp.
+96\,ms.
+\textbf{compression-focused} exhausts 60 predictor-context combinations
+and seven block sizes per image, using least-squares predictors with up to
+24 spatial taps and an adaptive range coder, reaching 3.367\,bpp.
 All three codecs outperform every tested general-purpose compressor in
 compression ratio, with all-rounder and speed-focused also beating bzip2-9
 and xz-6 in total runtime.

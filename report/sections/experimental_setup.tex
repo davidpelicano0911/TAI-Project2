@@ -39,6 +39,14 @@ H & Calibration       &  1550 &  6.61 \\
 \end{tabular}
 \end{table}
 
+\subsection{External Generalisation Dataset}
+To assess generalisation, we also tested all-rounder on the dataset
+of Quintas-Torra et al.~\cite{quintas2026}, consisting of 225 raw
+astronomical images from five telescopes (INT, JKT, LCO, TJO, WHT)
+with dimensions ranging from $510\times765$ to $4200\times2154$ pixels
+and sensor types different from those in the benchmark corpus.
+No codec parameters were retuned for this dataset.
+
 \subsection{Reference Compressors}
 We compare against the generic tools most commonly used for scientific data:
 \texttt{gzip} (levels 1, 6, 9), \texttt{bzip2} (levels 1, 9),
