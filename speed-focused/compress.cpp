@@ -229,17 +229,19 @@ static Block encode_block(const std::vector<uint16_t>& image,
 
 int main(int argc, char* argv[]) {
     build_lo_ctx_tab();
-    if (argc != 5) {
-        fprintf(stderr, "Usage: %s <n_rows> <n_cols> <input_raw> <output.prismb>\n", argv[0]);
+    if (argc != 3 && argc != 5) {
+        fprintf(stderr, "Usage: %s [n_rows n_cols] <input_raw> <output.prismb>\n", argv[0]);
         return 1;
     }
 
-    int H = std::atoi(argv[1]);
-    int W = std::atoi(argv[2]);
+    int H = (argc == 5) ? std::atoi(argv[1]) : 1500;
+    int W = (argc == 5) ? std::atoi(argv[2]) : 1500;
+    const char* in_path  = (argc == 5) ? argv[3] : argv[1];
+    const char* out_path = (argc == 5) ? argv[4] : argv[2];
     if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); return 1; }
 
-    FILE* fin = fopen(argv[3], "rb");
-    if (!fin) { fprintf(stderr, "Cannot open input: %s\n", argv[3]); return 1; }
+    FILE* fin = fopen(in_path, "rb");
+    if (!fin) { fprintf(stderr, "Cannot open input: %s\n", in_path); return 1; }
     fseek(fin, 0, SEEK_END);
     long fsize = ftell(fin);
     rewind(fin);
@@ -283,8 +285,8 @@ int main(int argc, char* argv[]) {
     }
     for (auto& th : workers) th.join();
 
-    FILE* fout = fopen(argv[4], "wb");
-    if (!fout) { fprintf(stderr, "Cannot open output: %s\n", argv[4]); return 1; }
+    FILE* fout = fopen(out_path, "wb");
+    if (!fout) { fprintf(stderr, "Cannot open output: %s\n", out_path); return 1; }
 
     fwrite(MAGIC, 1, 4, fout);
     write_u32le(fout, (uint32_t)W);

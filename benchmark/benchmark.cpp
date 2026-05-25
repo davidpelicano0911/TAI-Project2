@@ -114,8 +114,8 @@ static std::vector<Compressor> make_compressors(const std::string& /*tmp*/) {
         { "zstd-19", "zstd -19 -q -f {src} -o {dst}", "zstd -dq -f {src} -o {dst}", ".zst" },
 
         // --- our compressors ---
-        { "speed-focused",       "../speed-focused/compress 1500 1500 {src} {dst} 2>/dev/null",       "../speed-focused/decompress {src} {dst}",       ".spdF" },
-        { "all-rounder",         "../all-rounder/compress 1500 1500 {src} {dst} 2>/dev/null",         "../all-rounder/decompress {src} {dst}",         ".allr" },
+        { "speed-focused",       "../speed-focused/compress {src} {dst} 2>/dev/null",       "../speed-focused/decompress {src} {dst}",       ".spdF" },
+        { "all-rounder",         "../all-rounder/compress {src} {dst} 2>/dev/null",         "../all-rounder/decompress {src} {dst}",         ".allr" },
         { "compression-focused", "../compression-focused/compress {src} {dst} 2>/dev/null", "../compression-focused/decompress {src} {dst}", ".cmpF" },
     };
 }
