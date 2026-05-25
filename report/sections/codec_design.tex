@@ -19,6 +19,14 @@ simultaneously without coordination. A shared \texttt{std::atomic<int>} counter
 distributes work to a thread pool via \texttt{fetch\_add}, achieving lock-free
 load balancing with no mutex overhead.
 
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figs/fast_diagram.png}
+  \caption{speed-focused pipeline. Each strip is processed independently by a
+  worker thread: GAP prediction, zigzag mapping, hi/lo byte split, and adaptive
+  range coding with eight context models.}
+  \label{fig:fast_flow}
+\end{figure}
 
 Within each strip, pixels are predicted using the \emph{Gradient-Adjusted
 Prediction} (GAP) function of three causal neighbours: left ($W$), above ($N$),
