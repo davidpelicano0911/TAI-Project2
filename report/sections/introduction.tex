@@ -10,13 +10,23 @@ point-spread function create smooth gradients that extend over many pixels.
 Second, the readout electronics add a constant \emph{bias pedestal} to every
 pixel, introducing a strong DC component whose removal collapses the residual
 distribution around zero. Third, the data are 16-bit integers, whereas most
-general-purpose compressors operate on byte streams and therefore miss the
-spatial structure that spans byte boundaries.
+general-purpose compressors operate on byte streams, missing inter-byte
+structure.
 
 These properties motivate \emph{predictive} compression: subtract a spatial
 prediction $\hat{p}$ from each pixel, code only the residual $r = p - \hat{p}$,
-and exploit the fact that a good predictor concentrates residuals near zero,
-reducing entropy and improving compression.
+and exploit the fact that a good predictor concentrates the residuals near
+zero, thereby reducing entropy and improving compression.
+
+Existing domain-specific tools such as the FITS FPACK suite (Rice coding,
+Hcompress) operate after splitting pixels into individual bytes, thereby
+discarding inter-byte correlation. Our codecs handle 16-bit values natively
+and select the best predictor per block rather than applying a fixed rule
+to the whole image. This differs also from recent learned-predictor approaches
+such as Quintas-Torra et al.~\cite{quintas2026}, which train a weight matrix
+on a held-out set from the same sensor: our least-squares predictors solve
+per-block OLS on the image itself with no external training, making them
+immediately applicable to any sensor or telescope without retraining.
 
 We present three lossless compressors that exploit these properties, each
 targeting a distinct point on the speed--ratio trade-off:
@@ -25,20 +35,20 @@ targeting a distinct point on the speed--ratio trade-off:
   \item \textbf{speed-focused} applies a gradient-adjusted predictor (GAP) to
     the full 16-bit value and codes residuals with a range coder driven by
     eight context-conditioned adaptive models across parallel horizontal bands.
-    It prioritises throughput (${\sim}55$\,ms per image).
+    It prioritises throughput (${\sim}49$\,ms per image).
   \item \textbf{all-rounder} divides the image into square blocks, selects the best
     of five candidate predictors per block (including training-free
     least-squares), splits residuals into independent byte streams, and codes
     them with Finite State Entropy (FSE/tANS)~\cite{collet2013fse}.
-    It balances speed and ratio (${\sim}102$\,ms, 3.40\,bpp).
+    It balances speed and ratio (${\sim}96$\,ms, 3.40\,bpp).
   \item \textbf{compression-focused} evaluates 60 combinations of ten predictors
     (including LS-16 with 16 spatial neighbours and LS-24 with 24 neighbours)
-    and six context strategies per block, retains the smallest result, and uses an
+    and six context strategies per block, selects the smallest, and uses an
     LZMA-style adaptive range coder with Fenwick-tree models. Block size is
-    also optimised by trying eight candidates at compression time.
-    It achieves the best compression ratio (${\sim}3.37$\,bpp) at the cost of a
-    slower compression pass (${\sim}6.6$\,s), while decompression remains fast
-    (${\sim}131$\,ms).
+    also optimised by trying seven candidates at compression time.
+    It prioritises compression ratio (${\sim}3.37$\,bpp) at the cost of a
+    slower compression pass (${\sim}6.2$\,s); decompression is fast
+    (${\sim}133$\,ms).
 \end{itemize}
 
 Section~\ref{sec:codecs} describes the three codecs in detail.

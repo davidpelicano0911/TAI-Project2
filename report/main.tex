@@ -71,14 +71,14 @@ We present three lossless compressors for raw 16-bit astronomical images,
 each targeting a distinct point on the speed--ratio trade-off.
 \textbf{speed-focused} applies a gradient-adjusted predictor (GAP) over
 parallel horizontal strips and codes residuals with a context-adaptive range
-coder, reaching 3.505\,bpp in 55\,ms total.
-\textbf{all-rounder} selects the best of five per-block predictors ---
-including training-free least-squares with up to five spatial taps --- and
+coder, reaching 3.505\,bpp in 49\,ms total.
+\textbf{all-rounder} selects the best of five per-block predictors
+(including training-free least-squares with up to five spatial taps) and
 codes residuals with Finite State Entropy (tANS), achieving 3.400\,bpp in
-102\,ms.
-\textbf{compression-focused} extends all-rounder with a six-tap
-least-squares predictor and a context-aware cost estimator, reaching
-3.367\,bpp.
+96\,ms.
+\textbf{compression-focused} exhausts 60 predictor-context combinations
+and seven block sizes per image, using least-squares predictors with up to
+24 spatial taps and an adaptive range coder, reaching 3.367\,bpp.
 All three codecs outperform every tested general-purpose compressor in
 compression ratio, with all-rounder and speed-focused also beating bzip2-9
 and xz-6 in total runtime.
@@ -90,7 +90,6 @@ and xz-6 in total runtime.
 \input{sections/results}
 \input{sections/discussion}
 
-\newpage
 \enlargethispage{5\baselineskip}
 \begingroup
 \footnotesize
@@ -105,12 +104,12 @@ Claude~E. Shannon.
 
 \bibitem{collet2013fse}
 Yann Collet.
-\newblock Finite State Entropy --- a new entropy coder.
+\newblock Finite State Entropy: a new entropy coder.
 \newblock \url{https://github.com/Cyan4973/FiniteStateEntropy}, 2013.
 
 \bibitem{zstd}
 Yann Collet.
-\newblock Zstandard --- fast real-time compression algorithm.
+\newblock Zstandard: fast real-time compression algorithm.
 \newblock \url{https://github.com/facebook/zstd}, 2016.
 
 \bibitem{fits}
@@ -118,6 +117,14 @@ William~D. Pence, L.~Seaman, R.~Seaman, and R.~White.
 \newblock {FITS} lossless image compression.
 \newblock {\em Publications of the Astronomical Society of the Pacific},
   122(895):1065--1076, 2010.
+
+\bibitem{quintas2026}
+Pau Quintas-Torra, Xavier Fern\'{a}ndez-Mellado, Joan Bartrina-Rapesta,
+Sebasti\`{a} Mijares, Armando~J. Pinho, and Joan Serra-Sagrist\`{a}.
+\newblock Lossless compression of modern astronomical data using a novel
+  learned predictor.
+\newblock {\em Publications of the Astronomical Society of the Pacific},
+  138:044505, 2026.
 
 \bibitem{dryad}
 Michele Trovato, Claudio Talarico, Rosario Catanzaro, and Antonino Tumeo.

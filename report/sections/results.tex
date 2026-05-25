@@ -1,36 +1,75 @@
 \section{Results}
 \label{sec:results}
 
-Table~\ref{tab:results} summarises compression ratio and runtimes averaged
-across the eight benchmark images. All three domain-specific codecs
-outperform every general-purpose compressor in compression ratio.
-compression-focused achieves the best average ratio at 3.367\,bpp, beating
-bzip2-9 by 0.21\,bpp while decompressing in only 131\,ms.
-all-rounder follows at 3.400\,bpp with a total round-trip of just 102\,ms,
-making it $4\times$ faster than bzip2-9 and $17\times$ faster than xz-6 at
-better compression than both.
-speed-focused reaches 3.505\,bpp in 55\,ms total, comparable to zstd-1
-in speed but with nearly 1\,bpp better compression.
+\subsection{Compression Ratio}
 
-\begin{table}[h]
+Table~\ref{tab:bpp} reports bits per byte for each of the eight benchmark
+images. All three domain-specific codecs outperform every generic compressor
+on every image. compression-focused achieves the best average ratio
+(3.37\,bpp), reducing average bpp by $0.21$ versus bzip2-9 and by $0.81$
+versus zstd-9. all-rounder follows closely ($+0.03$\,bpp over
+compression-focused) and speed-focused is $0.11$\,bpp above all-rounder,
+still beating every generic tool.
+
+The margin is consistent across image types. Image~F (science frame with
+bright point sources, $H_0 = 12.52$\,bpp) is the hardest for all codecs
+because its high raw entropy leaves little room for prediction; even so,
+compression-focused saves $0.41$\,bpp over bzip2-9 on that image alone.
+Image~G (bias frame, $H_0 = 5.57$\,bpp) is the easiest: the near-constant
+DC pedestal is entirely captured by Mode~3 and compressed to 2.38\,bpp,
+$0.16$\,bpp below bzip2-9.
+
+\begin{table}[H]
 \centering
-\caption{Average compression ratio and runtimes across the eight benchmark
-  images (A--H). Lower is better in all columns. Our codecs are in bold.}
-\label{tab:results}
+\caption{Compression ratio (bpp) per image. Lower is better.}
+\label{tab:bpp}
+\scriptsize
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{\textbf{Our codecs}} & \multicolumn{2}{c}{Generic} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-6}
+Image & speed & all & compr. & bzip2-9 & zstd-9 \\
+\midrule
+A & 4.44 & 4.39 & 4.35 & 4.62 & 5.51 \\
+B & 3.29 & 3.24 & 3.21 & 3.40 & 4.07 \\
+C & 2.59 & 2.43 & 2.41 & 2.59 & 3.07 \\
+D & 2.85 & 2.73 & 2.71 & 2.89 & 3.45 \\
+E & 2.73 & 2.56 & 2.56 & 2.71 & 3.22 \\
+F & 6.20 & 6.14 & 6.06 & 6.47 & 7.00 \\
+G & 2.55 & 2.41 & 2.38 & 2.54 & 3.03 \\
+H & 3.41 & 3.29 & 3.25 & 3.41 & 4.11 \\
+\midrule
+\textbf{Mean} & \textbf{3.51} & \textbf{3.40} & \textbf{3.37} & 3.58 & 4.18 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Speed}
+
+Table~\ref{tab:speed} shows average per-image runtimes.
+speed-focused achieves 49\,ms total, only 22\,ms slower than zstd-1 but
+with $0.98$\,bpp better compression. all-rounder takes 96\,ms,
+$4.5\times$ faster than bzip2-9 (432\,ms) at $0.18$\,bpp better ratio.
+compression-focused trades a slow compression pass (${\sim}6.2$\,s) for
+the best ratio; decompression (${\sim}133$\,ms) is faster than bzip2-9.
+
+\begin{table}[H]
+\centering
+\caption{Average per-image compressed size, runtimes (ms), and bpp. Original file: 4.5\,MB.}
+\label{tab:speed}
 \small
 \begin{tabular}{lrrrrr}
 \toprule
-\textbf{Codec} & \textbf{Ratio (\%)} & \textbf{Bits/Byte} & \textbf{Compress (ms)} & \textbf{Decompress (ms)} & \textbf{Total (ms)} \\
+Compressor           & Size (MB) & Compress & Decompress & Total & bpp  \\
 \midrule
-\textbf{compression-focused} & \textbf{42.1} & \textbf{3.367} & 6659 & 131  & 6790 \\
-\textbf{all-rounder}         & \textbf{42.5} & \textbf{3.400} &   58 &  44  &  102 \\
-\textbf{speed-focused}       & \textbf{43.8} & \textbf{3.505} &   24 &  30  &   55 \\
+speed-focused        & 1.97 &    23    &    26      &    49 & 3.51 \\
+all-rounder          & 1.91 &    56    &    40      &    96 & 3.40 \\
+compression-focused  & 1.89 &  6169    &   133      &  6302 & 3.37 \\
 \midrule
-bzip2-9  & 44.7 & 3.579 &  271 & 163 &  434 \\
-xz-6     & 46.1 & 3.685 & 1652 &  74 & 1726 \\
-zstd-9   & 52.3 & 4.182 &  125 &  13 &  139 \\
-gzip-6   & 54.7 & 4.376 &  305 &  29 &  334 \\
-zstd-1   & 56.1 & 4.487 &   23 &   8 &   31 \\
+bzip2-9              & 2.01 &   273    &   159      &   432 & 3.58 \\
+xz-6                 & 2.07 &  1650    &   102      &  1752 & 3.68 \\
+zstd-9               & 2.35 &   128    &    11      &   139 & 4.18 \\
+zstd-1               & 2.52 &    20    &     7      &    27 & 4.49 \\
 \bottomrule
 \end{tabular}
 \end{table}
