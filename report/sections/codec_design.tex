@@ -17,17 +17,7 @@ The design of speed-focused centres on one principle: every horizontal strip of
 150 rows is entirely self-contained, so any number of strips can be compressed
 simultaneously without coordination. A shared \texttt{std::atomic<int>} counter
 distributes work to a thread pool via \texttt{fetch\_add}, achieving lock-free
-load balancing with no mutex overhead. Figure~\ref{fig:prismblock} illustrates
-the full pipeline.
-
-\begin{figure}[h]
-  \centering
-  \includegraphics[width=\linewidth]{figs/fast_diagram.png}
-  \caption{End-to-end pipeline of speed-focused. The image is partitioned into
-  horizontal strips processed in parallel; within each strip every pixel
-  follows the same predict -- residualise -- zigzag -- split -- encode path.}
-  \label{fig:prismblock}
-\end{figure}
+load balancing with no mutex overhead.
 
 Within each strip, pixels are predicted using the \emph{Gradient-Adjusted
 Prediction} (GAP) function of three causal neighbours: left ($W$), above ($N$),
@@ -70,19 +60,23 @@ exactly and yields at least four blocks. For $1500\times1500$ this gives
 $b=500$, producing a $3\times3$ grid of nine blocks of 500$\times$500 pixels.
 
 \subsubsection*{Predictive Modes}
-For each block, all-rounder evaluates five candidate predictors and retains the one
-with the lowest estimated coding cost (defined below).
-
-\begin{description}[leftmargin=2em, labelindent=0em]
-  \item[Mode~0 (raw)] Symbols are raw pixel values; no prediction.
-  \item[Mode~1 (avg)] $\hat{p} = \lfloor(W + N + NW + 1)/3\rfloor$.
-  \item[Mode~3 (gmean)] $\hat{p} = \bar{g}$, the global image mean computed
-    once before blocking. Removes the bias pedestal in all frames.
-  \item[Mode~4 (LS-4)] OLS with features $(W, N, NW, 1)$ per block via
-    Gauss-Jordan; four float32 weights (16\,B) stored in the block header.
-  \item[Mode~6 (LS-5)] Extends Mode~4 with $NE$ and $NN$; five weights
-    (20\,B). Both LS modes use the block's own pixels with no external training.
-\end{description}
+For each block, all-rounder evaluates five candidate predictors and selects
+the one with the lowest estimated coding cost. \textbf{Mode~0 (raw)} applies
+no prediction and codes pixel values directly; it wins only on blocks where
+spatial correlation has been destroyed by strong read-noise. \textbf{Mode~1
+(avg)} predicts each pixel as the three-neighbour average
+$\hat{p} = \lfloor(W+N+NW+1)/3\rfloor$, which smooths slowly varying stellar
+backgrounds effectively. \textbf{Mode~3 (gmean)} subtracts the global image
+mean $\bar{g}$ (computed once and stored in the 2-byte file header) from every
+pixel; this single operation removes the bias pedestal that dominates
+calibration frames, collapsing the residual distribution to near-zero at no
+per-block cost. \textbf{Mode~4 (LS-4)} solves a per-block ordinary
+least-squares regression with features $(W, N, NW, 1)$ via Gauss-Jordan
+elimination, producing four float32 weights (16\,B block overhead) that
+jointly adapt to local spatial gradients and residual DC offset.
+\textbf{Mode~6 (LS-5)} extends Mode~4 with above-right ($NE$) and two-rows-above
+($NN$) neighbours, adding a fifth weight (20\,B total) to capture vertical
+second-order structure present in science frames with extended emission.
 
 The mode selection criterion penalises stored weights:
 \[
@@ -140,30 +134,20 @@ pair inverts the process. This exhaustive search over block sizes incurs extra
 compression time but requires no tuning per image.
 
 \subsubsection*{Predictor Competition}
-For each block, compression-focused evaluates ten candidate predictors:
-
-\begin{description}[leftmargin=2em, labelindent=0em]
-  \item[Mode~0 (raw)] No prediction; symbols are raw pixel values.
-  \item[Mode~1 (avg)] $\hat{p} = \lfloor(W + N + NW + 1)/3\rfloor$.
-  \item[Mode~3 (gmean)] $\hat{p} = \bar{g}$, global image mean; removes bias pedestal.
-  \item[Mode~7 (GAP)] Gradient-adjusted prediction: selects among $W$, $N$, and
-    $W+N-NW$ based on the local horizontal and vertical gradient magnitudes.
-  \item[Mode~8 (MED)] JPEG-LS median predictor: $\hat{p} = \mathrm{median}(W, N, W+N-NW)$.
-  \item[Mode~4 (LS-4)] OLS with features $(W,N,NW,1)$; 4 float32 weights (16\,B overhead).
-  \item[Mode~6 (LS-5)] Adds $NE$ and $NN$; 5 weights (20\,B overhead).
-  \item[Mode~9 (LS-6)] OLS with $(W, N, NW, WW, NN, 1)$; 6 weights (24\,B overhead).
-    The second-order neighbours $WW$ and $NN$ capture slowly varying ramps.
-  \item[Mode~10 (LS-16)] 16-weight OLS spanning 4 pixels to the left, 7 pixels
-    in the row above (centred), 2 pixels two rows above, and a bias term
-    (64\,B overhead). Exploits long-range spatial structure in science frames.
-  \item[Mode~11 (LS-24)] 24-weight OLS extending LS-16 with 5 pixels to the left,
-    9 pixels in the row above, 5 pixels two rows above, and 4 pixels three rows
-    above (96\,B overhead). Captures wider spatial correlations.
-\end{description}
-
-All LS weights are solved per block via Gauss-Jordan elimination on the
-$N\times N$ normal equations; no external training data are required.
-Border pixels where the full neighbourhood is unavailable fall back to GAP.
+compression-focused evaluates ten predictors per block, spanning the full
+range from non-predictive to highly adaptive. Modes~0, 1, 3, GAP, and MED
+cover the same ground as all-rounder's five modes (raw, three-neighbour
+average, global mean, gradient-adjusted, and JPEG-LS median), providing a
+strong baseline across all image types. The five OLS predictors extend the
+context progressively: LS-4 uses $(W,N,NW,1)$ with 4 weights (16\,B); LS-5
+adds $NE$ and $NN$ for 5 weights (20\,B); LS-6 adds second-order neighbours
+$WW$ and $NN$ for 6 weights (24\,B); LS-16 expands to a 16-tap context
+spanning four pixels left and seven pixels above (64\,B); and LS-24 uses a
+24-tap context covering three full rows around the current pixel (96\,B).
+All LS weights are solved per block via Gauss-Jordan elimination with no
+external training. Border pixels where the full neighbourhood is unavailable
+fall back to GAP. The winner is chosen by actual compressed size across all
+$10\times6 = 60$ predictor-context combinations, eliminating estimation error.
 
 \subsubsection*{Context Modes and Block Competition}
 Each 16-bit zigzag residual is encoded byte-by-byte: first the high byte

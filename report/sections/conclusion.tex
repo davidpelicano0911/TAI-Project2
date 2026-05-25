@@ -1,10 +1,11 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-This work confirms the expected trade-off between compression strength
-and runtime. ACPAC achieved the best overall compression, LZAC was the
-fastest of the proposed codecs, and APEC occupied a useful middle
-ground between both extremes. More broadly, the results show that
-changing only the predictive model, while keeping arithmetic coding as
-the common back-end, is enough to produce clearly different operating
-points in practice.
+This work confirms the expected trade-off between compression strength and
+runtime. compression-focused achieved the best overall compression ratio
+(3.37\,bpp), speed-focused was the fastest of the three codecs (47\,ms
+total), and all-rounder occupied a useful middle ground (3.40\,bpp in
+93\,ms). More broadly, the results show that specialising the predictive
+model for 16-bit astronomical images is enough to outperform all tested
+general-purpose compressors in compression ratio while remaining competitive
+in runtime.

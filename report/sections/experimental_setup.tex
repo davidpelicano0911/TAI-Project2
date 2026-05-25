@@ -11,6 +11,34 @@ flat fields (smooth illumination gradients), and science frames (stellar
 fields, galaxies). This diversity ensures that no single predictor type
 dominates the results artificially.
 
+Table~\ref{tab:images} characterises each image by its zero-order entropy
+$H_0$ (bits per pixel, treating pixels as i.i.d.) and mean pixel value
+$\bar{p}$. These quantities explain predictor choice: low-entropy bias and flat
+frames are dominated by a DC pedestal that Mode~3 (global mean subtraction)
+removes in a single step; high-entropy science frames retain spatial structure
+after mean removal, making data-adaptive LS predictors beneficial.
+
+\begin{table}[H]
+\centering
+\caption{Benchmark image characterisation.}
+\label{tab:images}
+\small
+\begin{tabular}{llrr}
+\toprule
+Image & Type & $\bar{p}$ & $H_0$ (bpp) \\
+\midrule
+A & Stellar field     & 16199 & 10.27 \\
+B & Mixed sky         &  2396 &  6.81 \\
+C & Dark frame        &   610 &  4.87 \\
+D & Bias frame        &  1038 &  5.43 \\
+E & Flat field        &   113 &  5.11 \\
+F & Science (sources) & 30456 & 12.52 \\
+G & Bias frame        &  4073 &  5.57 \\
+H & Calibration       &  1550 &  6.61 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{Reference Compressors}
 We compare against the generic tools most commonly used for scientific data:
 \texttt{gzip} (levels 1, 6, 9), \texttt{bzip2} (levels 1, 9),

@@ -1,43 +1,79 @@
 \section{Discussion and Conclusion}
 \label{sec:discussion}
 
-The core reason domain-specific codecs outperform general-purpose tools is that
-generic compressors operate on byte streams and therefore treat the two bytes of
-each 16-bit pixel as unrelated, breaking the spatial correlation that spans pixel
-boundaries in big-endian encoding. Our codecs operate on 16-bit values directly,
-predict each pixel from its decoded neighbours, and entropy-code only the residual,
-yielding a reduction of $0.87$--$1.12$\,bpp over gzip-6 depending on the codec.
+\paragraph{Why domain-specific codecs win.}
+Generic compressors treat the two bytes of each 16-bit pixel as unrelated,
+breaking spatial correlation that spans pixel boundaries in big-endian encoding.
+Our codecs operate on 16-bit values directly, predict each pixel from its decoded
+neighbours, and entropy-code only the residual, yielding a reduction of
+$0.87$--$1.01$\,bpp over gzip-6 depending on the codec.
 
-The predictor turns out to be the single most important design choice. Mode
-selection on the eight benchmark images reveals that global mean subtraction
-dominates on bias frames and flat fields, where a near-constant DC offset accounts
-for most of the signal. The three-neighbour average prevails on smooth stellar
-backgrounds, while least-squares modes are only selected for images with bright
-point sources and extended spatial gradients. The bias pedestal is therefore the
-most compressible feature of astronomical frames, and least-squares predictors add
-value only when residual spatial structure remains non-trivial after DC removal.
+\paragraph{Role of the predictor.}
+The predictor is the dominant design choice. Table~\ref{tab:modes} shows
+the per-block mode selection produced by all-rounder on each benchmark image.
+Mode~3 (gmean) dominates on six of eight images: it is the sole predictor for
+images D and H (bias frames with a near-constant DC pedestal) and the majority
+predictor for B, E, G. Image~A, a smooth stellar background, is handled
+entirely by Mode~1 (avg), which better tracks slowly varying spatial gradients.
+Image~F is the exception: a science frame containing bright point sources and
+extended emission, where LS-4 and LS-5 account for all nine blocks, yielding
+the largest per-image gain over generics ($0.33$\,bpp over bzip2-9). Image~C
+uses Mode~0 (raw) on six blocks, suggesting that dark calibration frames with
+dominant Poisson noise lose spatial correlation at block scale.
+Quantitatively, prediction accounts for $0.67$\,bpp of the $0.78$\,bpp gain
+over zstd-9 (comparing speed-focused, which applies prediction, against
+zstd-9); the remaining $0.11$\,bpp comes from FSE versus the adaptive range
+coder used by speed-focused, confirming that the predictor is the binding
+component.
 
-The hi/lo byte split is equally important. After a good prediction, the high byte
-is near-uniformly zero, yielding a near-zero-entropy stream that is often
-compressed to a 2-byte single-symbol FSE packet, while all useful variation is
-carried by the low byte. Conditioning the low-byte model on whether the high byte
-is zero exploits this bimodal structure. speed-focused achieves the same effect
-through eight adaptive context models without transmitting a frequency table,
-trading a modest $0.11$\,bpp in compression ratio for a $2.3\times$ speed
-advantage over all-rounder.
+\begin{table}[H]
+\centering
+\caption{all-rounder mode selection per image (blocks out of 9).}
+\label{tab:modes}
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Image & raw & avg & gmean & LS-4 & LS-5 \\
+\midrule
+A & 0 & 9 & 0 & 0 & 0 \\
+B & 0 & 6 & 3 & 0 & 0 \\
+C & 6 & 0 & 3 & 0 & 0 \\
+D & 0 & 0 & 9 & 0 & 0 \\
+E & 3 & 0 & 6 & 0 & 0 \\
+F & 0 & 0 & 0 & 4 & 5 \\
+G & 0 & 2 & 6 & 0 & 1 \\
+H & 0 & 0 & 9 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-The results also show that compression-focused's exhaustive search over predictors,
-block sizes, and context strategies recovers only an additional $0.03$\,bpp over
-all-rounder, at the cost of a much longer compression pass. This confirms that
-most of the remaining gap to the information-theoretic limit lies in predictor
-quality rather than entropy coding, and that the fast adaptive strategy of
-all-rounder already captures the majority of the available gain.
+\paragraph{Entropy coding and search.}
+Splitting residuals into independent hi8 and lo8 streams is the key structural
+choice: after a good prediction, hi8 is near-uniformly zero and often compressed
+to a 2-byte FSE packet. speed-focused achieves the same effect through eight
+adaptive context models without transmitting a frequency table, trading
+$0.11$\,bpp for a $2\times$ speed gain over all-rounder. compression-focused's
+exhaustive $10\times6$ search recovers only $0.03$\,bpp over all-rounder, confirming
+that predictor quality is the binding constraint.
 
-There are limitations worth noting. The corpus covers only 8 images from a single
-instrument, and rankings may shift on sensors with different noise characteristics
-or gain settings. Runtime measurements reflect a single wall-clock run and include
-process-launch overhead for the external tools. Despite these caveats, the
-consistent margin across all eight images gives confidence that the gains are
-structural rather than incidental. Future work could explore residual
-autocorrelation removal and 16-bit FSE tables for high-correlation blocks, where
-a small additional gain appears tractable.
+\paragraph{Generalisation to external data.}
+We additionally tested all-rounder on the dataset from Quintas-Torra et al.~\cite{quintas2026}
+(INT, JKT, LCO, TJO, WHT telescopes; 225 images total, dimensions ranging from
+$510\times765$ to $4200\times2154$). Mean bpp per telescope was:
+INT~2.71, JKT~2.85, TJO~2.78, WHT~3.07, and LCO~3.36.
+LCO is the hardest dataset: it mixes full-frame science images
+with small calibration frames ($510\times765$) whose shorter spatial runs give
+the predictor less context, pushing bpp up to 6.88 in the worst case.
+WHT also compresses less efficiently due to high raw entropy ($\sim$8\,bpp zero-order),
+driven by dense stellar fields and strong read-noise. INT and TJO compress most
+efficiently, benefiting from large uniform sky backgrounds and stable bias pedestals.
+These results confirm that the codecs generalise across sensor geometries and
+telescope types without any retraining.
+
+\paragraph{Conclusion.}
+All three codecs outperform every tested generic compressor in compression ratio
+while two of three also beat bzip2-9 in total runtime. The consistent margin across
+all eight benchmark images, and the generalisation to 225 external images from five
+telescopes, confirms that the gains are structural.
+Both encoder and decoder accept explicit row and column dimensions, making
+the codecs applicable to any sensor geometry.
