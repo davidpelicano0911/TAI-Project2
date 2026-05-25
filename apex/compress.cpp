@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <thread>
 #include <unistd.h>
 #include <sys/wait.h>
 
@@ -59,9 +60,6 @@ static void remove_if_exists(const fs::path& p) {
 }
 
 int main(int argc, char* argv[]) {
-    // Suporta duas formas:
-    //   compress n_rows n_cols input output   (interface do professor)
-    //   compress input output                 (compatibilidade com benchmark)
     if (argc != 3 && argc != 5) {
         fprintf(stderr, "Usage: %s [n_rows n_cols] <input_raw> <output.apex>\n", argv[0]);
         return 1;
@@ -71,42 +69,62 @@ int main(int argc, char* argv[]) {
     const char* dst_path = (argc == 5) ? argv[4] : argv[2];
     std::string dims     = (argc == 5) ? (std::string(argv[1]) + " " + std::string(argv[2]) + " ") : "";
 
-    fs::path exe = fs::absolute(argv[0]).parent_path();
+    fs::path exe      = fs::absolute(argv[0]).parent_path();
     fs::path tmp_base = fs::path("/tmp") / ("apex_" + std::to_string((long long)getpid()));
-    fs::path range_path = tmp_base; range_path += ".nvr";
 
     struct Candidate {
-        uint8_t id;
-        fs::path path;
+        uint8_t    id;
+        fs::path   path;
         std::string command;
     };
 
-    std::string src          = shell_quote(src_path);
-    std::string range_compress = shell_quote((exe / "range_compress").string());
-    std::vector<Candidate> candidates = {
-        {9, range_path, range_compress + " " + dims + src + " " + shell_quote(range_path.string()) + " 500  >/dev/null 2>/dev/null"},
-        {9, range_path, range_compress + " " + dims + src + " " + shell_quote(range_path.string()) + " 750  >/dev/null 2>/dev/null"},
-        {9, range_path, range_compress + " " + dims + src + " " + shell_quote(range_path.string()) + " 1000 >/dev/null 2>/dev/null"},
-        {9, range_path, range_compress + " " + dims + src + " " + shell_quote(range_path.string()) + " 1500 >/dev/null 2>/dev/null"},
+    std::string src = shell_quote(src_path);
+    std::string rc  = shell_quote((exe / "range_compress").string());
+
+    // cada block size escreve para o seu próprio ficheiro temporário
+    auto nvr = [&](int bs) -> fs::path {
+        fs::path p = tmp_base;
+        p += "_" + std::to_string(bs) + ".nvr";
+        return p;
     };
 
+    std::vector<Candidate> candidates = {
+        {9, nvr(250),  rc + " " + dims + src + " " + shell_quote(nvr(250).string())  + " 250  >/dev/null 2>/dev/null"},
+        {9, nvr(300),  rc + " " + dims + src + " " + shell_quote(nvr(300).string())  + " 300  >/dev/null 2>/dev/null"},
+        {9, nvr(400),  rc + " " + dims + src + " " + shell_quote(nvr(400).string())  + " 400  >/dev/null 2>/dev/null"},
+        {9, nvr(500),  rc + " " + dims + src + " " + shell_quote(nvr(500).string())  + " 500  >/dev/null 2>/dev/null"},
+        {9, nvr(750),  rc + " " + dims + src + " " + shell_quote(nvr(750).string())  + " 750  >/dev/null 2>/dev/null"},
+        {9, nvr(1000), rc + " " + dims + src + " " + shell_quote(nvr(1000).string()) + " 1000 >/dev/null 2>/dev/null"},
+        {9, nvr(1500), rc + " " + dims + src + " " + shell_quote(nvr(1500).string()) + " 1500 >/dev/null 2>/dev/null"},
+        {9, nvr(2000), rc + " " + dims + src + " " + shell_quote(nvr(2000).string()) + " 2000 >/dev/null 2>/dev/null"},
+    };
+
+    // apaga ficheiros anteriores e lança os 4 em paralelo
+    for (const auto& c : candidates) remove_if_exists(c.path);
+
+    {
+        std::vector<std::thread> threads;
+        threads.reserve(candidates.size());
+        for (const auto& c : candidates)
+            threads.emplace_back([cmd = c.command]() { run_cmd(cmd); });
+        for (auto& t : threads) t.join();
+    }
+
+    // escolhe o resultado mais pequeno
     bool have_best = false;
     uint8_t best_id = 0;
     std::vector<uint8_t> best_payload;
 
     for (const auto& c : candidates) {
-        remove_if_exists(c.path);
-        if (run_cmd(c.command) != 0) continue;
         std::vector<uint8_t> payload;
-        if (!read_file(c.path, payload)) continue;
+        if (!read_file(c.path, payload)) { remove_if_exists(c.path); continue; }
         if (!have_best || payload.size() < best_payload.size()) {
             have_best = true;
-            best_id = c.id;
+            best_id   = c.id;
             best_payload.swap(payload);
         }
+        remove_if_exists(c.path);
     }
-
-    remove_if_exists(range_path);
 
     if (!have_best) {
         fprintf(stderr, "apex: all candidate compressors failed\n");

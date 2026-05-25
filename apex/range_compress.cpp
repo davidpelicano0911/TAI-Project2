@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #include "../hais2/model/CompressorModel.hpp"
@@ -243,18 +245,23 @@ static int lo_ctx(uint8_t hi, int mode) {
 
 static std::vector<uint8_t> encode_syms(const std::vector<uint16_t>& syms,
                                         int ctx_mode) {
-    std::vector<AdaptModel> hi_models(1);
-    std::vector<AdaptModel> lo_models(ctx_mode == 0 ? 1 : (ctx_mode == 1 ? 4 : 256));
-    hi_models[0].init();
+    bool hi_ctx = (ctx_mode >= 3);
+    int base_ctx = hi_ctx ? ctx_mode - 3 : ctx_mode;
+    std::vector<AdaptModel> hi_models(hi_ctx ? 4 : 1);
+    std::vector<AdaptModel> lo_models(base_ctx == 0 ? 1 : (base_ctx == 1 ? 4 : 256));
+    for (auto& m : hi_models) m.init();
     for (auto& m : lo_models) m.init();
 
     RangeEncoder enc;
     enc.out.reserve(syms.size() * 2 / 3);
+    uint8_t prev_hi = 0;
     for (uint16_t s : syms) {
         uint8_t hi = (uint8_t)(s >> 8);
         uint8_t lo = (uint8_t)(s & 255);
-        enc.encode(hi_models[0], hi);
-        enc.encode(lo_models[lo_ctx(hi, ctx_mode)], lo);
+        int hi_idx = hi_ctx ? lo_ctx(prev_hi, 1) : 0;
+        enc.encode(hi_models[hi_idx], hi);
+        enc.encode(lo_models[lo_ctx(hi, base_ctx)], lo);
+        prev_hi = hi;
     }
     enc.finish();
     return enc.out;
@@ -341,6 +348,85 @@ static void ls16_compute(const std::vector<uint16_t>& blk, int bw, int bh,
     }
 }
 
+static void ls24_compute(const std::vector<uint16_t>& blk, int bw, int bh,
+                         float w[24], std::vector<uint16_t>& syms) {
+    double XtX[24][24] = {}, Xty[24] = {};
+    for (int y = 3; y < bh; y++) {
+        for (int x = 5; x < bw - 4; x++) {
+            double f[24] = {
+                (double)blk[y * bw + x - 1],
+                (double)blk[y * bw + x - 2],
+                (double)blk[y * bw + x - 3],
+                (double)blk[y * bw + x - 4],
+                (double)blk[y * bw + x - 5],
+                (double)blk[(y - 1) * bw + x],
+                (double)blk[(y - 1) * bw + x - 1],
+                (double)blk[(y - 1) * bw + x + 1],
+                (double)blk[(y - 1) * bw + x - 2],
+                (double)blk[(y - 1) * bw + x + 2],
+                (double)blk[(y - 1) * bw + x - 3],
+                (double)blk[(y - 1) * bw + x + 3],
+                (double)blk[(y - 1) * bw + x - 4],
+                (double)blk[(y - 1) * bw + x + 4],
+                (double)blk[(y - 2) * bw + x],
+                (double)blk[(y - 2) * bw + x - 1],
+                (double)blk[(y - 2) * bw + x + 1],
+                (double)blk[(y - 2) * bw + x - 2],
+                (double)blk[(y - 2) * bw + x + 2],
+                (double)blk[(y - 3) * bw + x],
+                (double)blk[(y - 3) * bw + x - 1],
+                (double)blk[(y - 3) * bw + x + 1],
+                (double)blk[(y - 3) * bw + x - 2],
+                1.0
+            };
+            double t = blk[y * bw + x];
+            for (int i = 0; i < 24; i++) {
+                Xty[i] += f[i] * t;
+                for (int j = 0; j < 24; j++) XtX[i][j] += f[i] * f[j];
+            }
+        }
+    }
+    ls_solve<24>(XtX, Xty, w);
+
+    syms.resize((size_t)bw * bh);
+    for (int y = 0; y < bh; y++) {
+        for (int x = 0; x < bw; x++) {
+            int idx = y * bw + x;
+            uint16_t pred;
+            if (y < 3 || x < 5 || x >= bw - 4) {
+                pred = gap_pred(blk, x, y, bw);
+            } else {
+                float p = w[0]  * blk[y * bw + x - 1]
+                        + w[1]  * blk[y * bw + x - 2]
+                        + w[2]  * blk[y * bw + x - 3]
+                        + w[3]  * blk[y * bw + x - 4]
+                        + w[4]  * blk[y * bw + x - 5]
+                        + w[5]  * blk[(y - 1) * bw + x]
+                        + w[6]  * blk[(y - 1) * bw + x - 1]
+                        + w[7]  * blk[(y - 1) * bw + x + 1]
+                        + w[8]  * blk[(y - 1) * bw + x - 2]
+                        + w[9]  * blk[(y - 1) * bw + x + 2]
+                        + w[10] * blk[(y - 1) * bw + x - 3]
+                        + w[11] * blk[(y - 1) * bw + x + 3]
+                        + w[12] * blk[(y - 1) * bw + x - 4]
+                        + w[13] * blk[(y - 1) * bw + x + 4]
+                        + w[14] * blk[(y - 2) * bw + x]
+                        + w[15] * blk[(y - 2) * bw + x - 1]
+                        + w[16] * blk[(y - 2) * bw + x + 1]
+                        + w[17] * blk[(y - 2) * bw + x - 2]
+                        + w[18] * blk[(y - 2) * bw + x + 2]
+                        + w[19] * blk[(y - 3) * bw + x]
+                        + w[20] * blk[(y - 3) * bw + x - 1]
+                        + w[21] * blk[(y - 3) * bw + x + 1]
+                        + w[22] * blk[(y - 3) * bw + x - 2]
+                        + w[23];
+                pred = clamp_float(p);
+            }
+            syms[idx] = zigzag((int16_t)(blk[idx] - pred));
+        }
+    }
+}
+
 static BlockResult compress_block(const std::vector<uint16_t>& image,
                                   int W, int H, int bs,
                                   int bx, int by, uint16_t gmean) {
@@ -353,15 +439,18 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
         for (int x = 0; x < bw; x++)
             blk[y * bw + x] = image[(by * bs + y) * W + bx * bs + x];
 
-    std::vector<uint16_t> s0, s1, s3, s4, s6, s9, s10;
-    float w4[4], w5[5], w6[6], w16[16];
+    std::vector<uint16_t> s0, s1, s3, s4, s6, s7, s8, s9, s10, s11;
+    float w4[4], w5[5], w6[6], w16[16], w24[24];
     make_syms(blk, 0, bw, bh, s0, gmean);
     make_syms(blk, 1, bw, bh, s1, gmean);
     make_syms(blk, 3, bw, bh, s3, gmean);
+    make_syms(blk, 7, bw, bh, s7, gmean);   // GAP
+    make_syms(blk, 8, bw, bh, s8, gmean);   // MED
     ls4_compute(blk, bw, bh, w4, s4);
     ls5_compute(blk, bw, bh, w5, s6);
     ls6_compute(blk, bw, bh, w6, s9);
     ls16_compute(blk, bw, bh, w16, s10);
+    ls24_compute(blk, bw, bh, w24, s11);
 
     struct Candidate {
         uint8_t mode;
@@ -370,19 +459,22 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
         int nweights;
     };
     const Candidate candidates[] = {
-        {0, &s0, nullptr, 0},
-        {1, &s1, nullptr, 0},
-        {3, &s3, nullptr, 0},
-        {4, &s4, w4, 4},
-        {6, &s6, w5, 5},
-        {9, &s9, w6, 6},
+        {0,  &s0,  nullptr, 0},
+        {1,  &s1,  nullptr, 0},
+        {3,  &s3,  nullptr, 0},
+        {7,  &s7,  nullptr, 0},   // GAP
+        {8,  &s8,  nullptr, 0},   // MED
+        {4,  &s4,  w4,  4},
+        {6,  &s6,  w5,  5},
+        {9,  &s9,  w6,  6},
         {10, &s10, w16, 16},
+        {11, &s11, w24, 24},
     };
 
     BlockResult best;
     size_t best_size = (size_t)-1;
     for (const auto& c : candidates) {
-        for (int ctx = 0; ctx <= 2; ctx++) {
+        for (int ctx = 0; ctx <= 5; ctx++) {
             std::vector<uint8_t> payload = encode_syms(*c.syms, ctx);
             size_t total = payload.size() + (size_t)c.nweights * 4;
             if (total < best_size) {
@@ -461,9 +553,33 @@ int main(int argc, char* argv[]) {
     write_u32le(fout, (uint32_t)bs);
     write_u16le(fout, gmean);
 
+    int total_blocks = blocks_x * blocks_y;
+    std::vector<BlockResult> results(total_blocks);
+    std::atomic<int> blk_counter{0};
+
+    int nthreads = (int)std::thread::hardware_concurrency();
+    if (nthreads < 1) nthreads = 1;
+    if (nthreads > total_blocks) nthreads = total_blocks;
+
+    auto worker = [&]() {
+        int idx;
+        while ((idx = blk_counter.fetch_add(1)) < total_blocks) {
+            int bx = idx % blocks_x;
+            int by = idx / blocks_x;
+            results[idx] = compress_block(image, W, H, bs, bx, by, gmean);
+        }
+    };
+
+    {
+        std::vector<std::thread> workers;
+        workers.reserve(nthreads);
+        for (int i = 0; i < nthreads; i++) workers.emplace_back(worker);
+        for (auto& t : workers) t.join();
+    }
+
     for (int by = 0; by < blocks_y; by++) {
         for (int bx = 0; bx < blocks_x; bx++) {
-            BlockResult r = compress_block(image, W, H, bs, bx, by, gmean);
+            BlockResult& r = results[by * blocks_x + bx];
             write_u8(fout, r.mode);
             write_u8(fout, r.ctx_mode);
             write_u32le(fout, (uint32_t)r.payload.size());
