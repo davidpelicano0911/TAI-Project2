@@ -122,8 +122,8 @@ into pre-allocated per-block slots with no mutex required.
 
 \subsubsection*{Two-Tier Architecture}
 APEX separates orchestration from compression. The outer \texttt{compress}
-binary runs the inner \texttt{range\_compress} engine eight times with block
-sizes $\{250, 300, 400, 500, 750, 1000, 1500, 2000\}$ pixels in parallel,
+binary runs the inner \texttt{range\_compress} engine seven times with block
+sizes $\{250, 300, 400, 500, 750, 1000, 1500\}$ pixels in parallel,
 retains the smallest result, and wraps it with a 5-byte \texttt{APX2} magic
 header. The corresponding \texttt{decompress} / \texttt{range\_decompress}
 pair inverts the process. This exhaustive search over block sizes incurs extra

@@ -96,7 +96,6 @@ int main(int argc, char* argv[]) {
         {9, nvr(750),  rc + " " + dims + src + " " + shell_quote(nvr(750).string())  + " 750  >/dev/null 2>/dev/null"},
         {9, nvr(1000), rc + " " + dims + src + " " + shell_quote(nvr(1000).string()) + " 1000 >/dev/null 2>/dev/null"},
         {9, nvr(1500), rc + " " + dims + src + " " + shell_quote(nvr(1500).string()) + " 1500 >/dev/null 2>/dev/null"},
-        {9, nvr(2000), rc + " " + dims + src + " " + shell_quote(nvr(2000).string()) + " 2000 >/dev/null 2>/dev/null"},
     };
 
     // apaga ficheiros anteriores e lança os 4 em paralelo
