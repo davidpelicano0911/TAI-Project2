@@ -5,12 +5,12 @@ All three codecs share the same high-level pipeline: parse the raw big-endian
 16-bit image; apply a spatial predictor $\hat{p}$; zigzag-encode the signed
 residual $r = \text{pixel} - \hat{p}$ as an unsigned symbol
 $z = 2r$ if $r\ge0$, $z = -2r-1$ otherwise; entropy-code the result.
-Zigzag maps small-magnitude residuals, which are the common case after a
-good prediction, to small unsigned integers, concentrating the symbol
+Zigzag maps small-magnitude residuals — which are the common case after a
+good prediction — to small unsigned integers, concentrating the symbol
 distribution near zero regardless of sign.
 
 % ── speed-focused ───────────────────────────────────────────────────────────────
-\subsection{speed-focused}
+\subsection{speed-focused: Speed-Focused}
 \label{sec:speed}
 
 The design of speed-focused centres on one principle: every horizontal strip of
@@ -18,6 +18,7 @@ The design of speed-focused centres on one principle: every horizontal strip of
 simultaneously without coordination. A shared \texttt{std::atomic<int>} counter
 distributes work to a thread pool via \texttt{fetch\_add}, achieving lock-free
 load balancing with no mutex overhead.
+
 
 Within each strip, pixels are predicted using the \emph{Gradient-Adjusted
 Prediction} (GAP) function of three causal neighbours: left ($W$), above ($N$),
@@ -48,8 +49,8 @@ with bin boundaries $\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
 Each model halves all counts when the running total reaches $2^{16}$, keeping
 the frequency estimates responsive to distribution shifts within a strip.
 
-% ── all-rounder ──────────────────────────────────────────────────────────────
-\subsection{all-rounder}
+% ── HAIS ──────────────────────────────────────────────────────────────────────
+\subsection{all-rounder: Balanced}
 \label{sec:balanced}
 
 \subsubsection*{Block Selection}
@@ -109,8 +110,8 @@ $\text{nnz}\times5$\,B symbol--frequency pairs); or \emph{dense}
 Because the high byte of a small residual is almost always zero, the lo8
 distribution differs substantially depending on whether $\mathrm{hi}=0$.
 When the fraction of zero high bytes falls between 2\% and 98\%, all-rounder
-builds two conditional lo8 streams: \texttt{lo\_zero}
-(pixels with $\mathrm{hi}=0$) and \texttt{lo\_nonzero}. It uses the
+builds two conditional lo8 streams — $\texttt{lo\_zero}$
+(pixels with $\mathrm{hi}=0$) and $\texttt{lo\_nonzero}$ — and uses the
 three-stream layout only if its compressed size is strictly smaller than the
 two-stream baseline. The high-byte stream is encoded once and shared between
 both candidate payloads. Bit~7 of the mode byte signals the active layout.
@@ -121,17 +122,28 @@ Blocks are dispatched to a thread pool via a single
 into pre-allocated per-block slots with no mutex required.
 
 % ── compression-focused ──────────────────────────────────────────────────────
-\subsection{compression-focused}
+\subsection{compression-focused: Compression Focused}
 \label{sec:compression}
 
-\subsubsection*{Two-Tier Architecture}
 compression-focused separates orchestration from compression. The outer \texttt{compress}
-binary runs the inner \texttt{range\_compress} engine eight times with block
+binary runs the inner \texttt{range\_compress} engine seven times with block
 sizes $\{250, 300, 400, 500, 750, 1000, 1500\}$ pixels in parallel,
-retains the smallest result, and wraps it with a 5-byte \texttt{APX2} magic
+retains the smallest result, and wraps it with a 5-byte magic
 header. The corresponding \texttt{decompress} / \texttt{range\_decompress}
 pair inverts the process. This exhaustive search over block sizes incurs extra
 compression time but requires no tuning per image.
+
+Figure~\ref{fig:compression_flow} summarises the full pipeline.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figs/compression_focused_diagram.png}
+  \caption{compression-focused pipeline. The outer search runs \texttt{range\_compress}
+  seven times in parallel (one per block size) and retains the smallest output.
+  Inside each run, every block is compressed under all $10 \times 6 = 60$
+  predictor/context combinations and the best is stored in the block header.}
+  \label{fig:compression_flow}
+\end{figure}
 
 \subsubsection*{Predictor Competition}
 compression-focused evaluates ten predictors per block, spanning the full
@@ -159,7 +171,7 @@ combining hi-byte and lo-byte conditioning:
     $z_h \in \{0\},\{1\text{--}2\},\{3\text{--}8\},\{>8\}$.
   \item \textbf{ctx~2}: single hi model; 256 lo models (one per $z_h$ value).
   \item \textbf{ctx~3--5}: same lo conditioning as ctx~0--2, but the hi byte
-    is coded with four models conditioned on the previous hi byte
+    is coded with \emph{four} models conditioned on the previous hi byte
     $z_h^{(t-1)}$ using the same four-bin scheme. This order-1 hi context
     exploits spatial runs of similarly sized residuals.
 \end{itemize}

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2025/dev/Debian) (preloaded format=pdflatex 2025.12.8)  25 MAY 2026 20:51
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2025/dev/Debian) (preloaded format=pdflatex 2025.12.8)  25 MAY 2026 20:53
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1003,7 +1003,7 @@ st/fonts/enc/dvips/base/8r.enc}]
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.117 
+l.118 
       
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -1017,12 +1017,34 @@ Underfull \hbox (badness 2401) in paragraph at lines 128--135
 ion. The outer \T1/cmtt/m/n/10 compress \T1/ptm/m/n/10 bi-nary runs the in-ner
  []
 
+<figs/compression_focused_diagram.png, id=96, 8221.71625pt x 1353.055pt>
+File: figs/compression_focused_diagram.png Graphic file (type png)
+<use figs/compression_focused_diagram.png>
+Package pdftex.def Info: figs/compression_focused_diagram.png  used on input li
+ne 140.
+(pdftex.def)             Requested size: 484.20877pt x 79.67264pt.
 ) (./sections/experimental_setup.tex
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.20 
+l.1 \section
+            {Experimental Setup}
+The control sequence at the end of the top line
+of your error message was never \def'ed. If you have
+misspelled it (e.g., `\hobx'), type `I' and the correct
+spelling (e.g., `I\hbox'). Otherwise just continue,
+and I'll forget about whatever was undefined.
+
+[3 <./figs/compression_focused_diagram.png>]) (./sections/results.tex
+Underfull \vbox (badness 1286) has occurred while \output is active []
+
+
+
+! Undefined control sequence.
+\f@nch@orh ->\scshape \footnotesize \headeright 
+                                                \strut 
+l.39 
      
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -1030,12 +1052,15 @@ misspelled it (e.g., `\hobx'), type `I' and the correct
 spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
-[3]) (./sections/results.tex
+[4]) (./sections/discussion.tex
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
                                                 \strut 
-l.69 
+l.49 
      
 The control sequence at the end of the top line
 of your error message was never \def'ed. If you have
@@ -1043,20 +1068,7 @@ misspelled it (e.g., `\hobx'), type `I' and the correct
 spelling (e.g., `I\hbox'). Otherwise just continue,
 and I'll forget about whatever was undefined.
 
-[4]) (./sections/discussion.tex)
-
-! Undefined control sequence.
-\f@nch@orh ->\scshape \footnotesize \headeright 
-                                                \strut 
-l.110 \bibitem{zstd}
-                    
-The control sequence at the end of the top line
-of your error message was never \def'ed. If you have
-misspelled it (e.g., `\hobx'), type `I' and the correct
-spelling (e.g., `I\hbox'). Otherwise just continue,
-and I'll forget about whatever was undefined.
-
-[5]
+[5])
 
 ! Undefined control sequence.
 \f@nch@orh ->\scshape \footnotesize \headeright 
@@ -1075,16 +1087,16 @@ LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
 Package rerunfilecheck Info: File `main.out' has not changed.
-(rerunfilecheck)             Checksum: 044F281A34A3FCC22456FCC49066EBD6;1762.
+(rerunfilecheck)             Checksum: A6E5D773A64FCC2B432C711133103284;2004.
  ) 
 Here is how much of TeX's memory you used:
- 28292 strings out of 475085
- 522670 string characters out of 5764176
+ 28309 strings out of 475085
+ 523169 string characters out of 5764176
  1140737 words of memory out of 5000000
- 50778 multiletter control sequences out of 15000+600000
- 611639 words of font info for 85 fonts, out of 8000000 for 9000
+ 50794 multiletter control sequences out of 15000+600000
+ 612265 words of font info for 87 fonts, out of 8000000 for 9000
  61 hyphenation exceptions out of 8191
- 84i,12n,87p,1001b,614s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,12n,87p,1001b,471s stack positions out of 10000i,1000n,20000p,200000b,200000s
  </home/tomasbras/.texlive2025/texmf-var/fonts/pk/ljfour/jknappen/ec/ectt0900
 .600pk> </home/tomasbras/.texlive2025/texmf-var/fonts/pk/ljfour/jknappen/ec/ect
 t1000.600pk></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmex1
@@ -1099,10 +1111,10 @@ blic/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/a
 msfonts/cm/cmsy7.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8
 a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/sha
 re/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on main.pdf (6 pages, 193129 bytes).
+Output written on main.pdf (6 pages, 481145 bytes).
 PDF statistics:
- 284 PDF objects out of 1000 (max. 8388607)
- 181 compressed objects within 2 object streams
+ 286 PDF objects out of 1000 (max. 8388607)
+ 184 compressed objects within 2 object streams
  46 named destinations out of 1000 (max. 500000)
- 11901 words of extra memory for PDF output out of 12000 (max. 10000000)
+ 12930 words of extra memory for PDF output out of 14400 (max. 10000000)
 
