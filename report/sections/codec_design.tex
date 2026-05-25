@@ -5,12 +5,12 @@ All three codecs share the same high-level pipeline: parse the raw big-endian
 16-bit image; apply a spatial predictor $\hat{p}$; zigzag-encode the signed
 residual $r = \text{pixel} - \hat{p}$ as an unsigned symbol
 $z = 2r$ if $r\ge0$, $z = -2r-1$ otherwise; entropy-code the result.
-Zigzag maps small-magnitude residuals — which are the common case after a
-good prediction — to small unsigned integers, concentrating the symbol
+Zigzag maps small-magnitude residuals, which are the common case after a
+good prediction, to small unsigned integers, concentrating the symbol
 distribution near zero regardless of sign.
 
 % ── speed-focused ───────────────────────────────────────────────────────────────
-\subsection{speed-focused: Speed-Focused}
+\subsection{speed-focused}
 \label{sec:speed}
 
 The design of speed-focused centres on one principle: every horizontal strip of
@@ -28,7 +28,6 @@ the full pipeline.
   follows the same predict -- residualise -- zigzag -- split -- encode path.}
   \label{fig:prismblock}
 \end{figure}
-
 
 Within each strip, pixels are predicted using the \emph{Gradient-Adjusted
 Prediction} (GAP) function of three causal neighbours: left ($W$), above ($N$),
@@ -59,8 +58,8 @@ with bin boundaries $\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
 Each model halves all counts when the running total reaches $2^{16}$, keeping
 the frequency estimates responsive to distribution shifts within a strip.
 
-% ── HAIS ──────────────────────────────────────────────────────────────────────
-\subsection{all-rounder: Balanced}
+% ── all-rounder ──────────────────────────────────────────────────────────────
+\subsection{all-rounder}
 \label{sec:balanced}
 
 \subsubsection*{Block Selection}
@@ -82,7 +81,7 @@ with the lowest estimated coding cost (defined below).
   \item[Mode~4 (LS-4)] OLS with features $(W, N, NW, 1)$ per block via
     Gauss-Jordan; four float32 weights (16\,B) stored in the block header.
   \item[Mode~6 (LS-5)] Extends Mode~4 with $NE$ and $NN$; five weights
-    (20\,B). Both LS modes use the block's own pixels — no external training.
+    (20\,B). Both LS modes use the block's own pixels with no external training.
 \end{description}
 
 The mode selection criterion penalises stored weights:
@@ -116,8 +115,8 @@ $\text{nnz}\times5$\,B symbol--frequency pairs); or \emph{dense}
 Because the high byte of a small residual is almost always zero, the lo8
 distribution differs substantially depending on whether $\mathrm{hi}=0$.
 When the fraction of zero high bytes falls between 2\% and 98\%, all-rounder
-builds two conditional lo8 streams — $\texttt{lo\_zero}$
-(pixels with $\mathrm{hi}=0$) and $\texttt{lo\_nonzero}$ — and uses the
+builds two conditional lo8 streams: \texttt{lo\_zero}
+(pixels with $\mathrm{hi}=0$) and \texttt{lo\_nonzero}. It uses the
 three-stream layout only if its compressed size is strictly smaller than the
 two-stream baseline. The high-byte stream is encoded once and shared between
 both candidate payloads. Bit~7 of the mode byte signals the active layout.
@@ -128,7 +127,7 @@ Blocks are dispatched to a thread pool via a single
 into pre-allocated per-block slots with no mutex required.
 
 % ── compression-focused ──────────────────────────────────────────────────────
-\subsection{compression-focused: Best Ratio}
+\subsection{compression-focused}
 \label{sec:compression}
 
 \subsubsection*{Two-Tier Architecture}
@@ -176,7 +175,7 @@ combining hi-byte and lo-byte conditioning:
     $z_h \in \{0\},\{1\text{--}2\},\{3\text{--}8\},\{>8\}$.
   \item \textbf{ctx~2}: single hi model; 256 lo models (one per $z_h$ value).
   \item \textbf{ctx~3--5}: same lo conditioning as ctx~0--2, but the hi byte
-    is coded with \emph{four} models conditioned on the previous hi byte
+    is coded with four models conditioned on the previous hi byte
     $z_h^{(t-1)}$ using the same four-bin scheme. This order-1 hi context
     exploits spatial runs of similarly sized residuals.
 \end{itemize}
