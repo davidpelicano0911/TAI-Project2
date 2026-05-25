@@ -234,10 +234,16 @@ static int lo_ctx(uint8_t hi, int mode) {
     return 0;
 }
 
-static uint16_t decode_sym(RangeDecoder& dec, AdaptModel& hi_model,
-                           std::vector<AdaptModel>& lo_models, int ctx_mode) {
-    uint8_t hi = dec.decode(hi_model);
-    uint8_t lo = dec.decode(lo_models[lo_ctx(hi, ctx_mode)]);
+static uint16_t decode_sym(RangeDecoder& dec,
+                           std::vector<AdaptModel>& hi_models,
+                           std::vector<AdaptModel>& lo_models,
+                           int ctx_mode, uint8_t& prev_hi) {
+    bool hi_ctx = (ctx_mode >= 3);
+    int base_ctx = hi_ctx ? ctx_mode - 3 : ctx_mode;
+    int hi_idx = hi_ctx ? lo_ctx(prev_hi, 1) : 0;
+    uint8_t hi = dec.decode(hi_models[hi_idx]);
+    uint8_t lo = dec.decode(lo_models[lo_ctx(hi, base_ctx)]);
+    prev_hi = hi;
     return (uint16_t)(((uint16_t)hi << 8) | lo);
 }
 
@@ -252,12 +258,17 @@ static uint16_t predict_pixel(const std::vector<uint16_t>& blk,
                               uint16_t gmean,
                               const float* w4,
                               const float* w5,
-                              const float* w6) {
+                              const float* w6,
+                              const float* w24) {
     switch (mode) {
     case 1:
         return avg_pred(blk, x, y, bw);
     case 3:
         return gmean;
+    case 7:
+        return gap_pred(blk, x, y, bw);
+    case 8:
+        return med_pred(blk, x, y, bw);
     case 4:
         if (y == 0 && x == 0) return clamp_float(w4[3]);
         if (y == 0) return clamp_float(w4[0] * blk[x - 1] + w4[3]);
@@ -312,6 +323,32 @@ static uint16_t predict_pixel(const std::vector<uint16_t>& blk,
                            w6[13] * blk[(y - 2) * bw + x + 1] +
                            w6[14] * blk[(y - 3) * bw + x] +
                            w6[15]);
+    case 11:
+        if (y < 3 || x < 5 || x >= bw - 4) return gap_pred(blk, x, y, bw);
+        return clamp_float(w24[0]  * blk[y * bw + x - 1] +
+                           w24[1]  * blk[y * bw + x - 2] +
+                           w24[2]  * blk[y * bw + x - 3] +
+                           w24[3]  * blk[y * bw + x - 4] +
+                           w24[4]  * blk[y * bw + x - 5] +
+                           w24[5]  * blk[(y - 1) * bw + x] +
+                           w24[6]  * blk[(y - 1) * bw + x - 1] +
+                           w24[7]  * blk[(y - 1) * bw + x + 1] +
+                           w24[8]  * blk[(y - 1) * bw + x - 2] +
+                           w24[9]  * blk[(y - 1) * bw + x + 2] +
+                           w24[10] * blk[(y - 1) * bw + x - 3] +
+                           w24[11] * blk[(y - 1) * bw + x + 3] +
+                           w24[12] * blk[(y - 1) * bw + x - 4] +
+                           w24[13] * blk[(y - 1) * bw + x + 4] +
+                           w24[14] * blk[(y - 2) * bw + x] +
+                           w24[15] * blk[(y - 2) * bw + x - 1] +
+                           w24[16] * blk[(y - 2) * bw + x + 1] +
+                           w24[17] * blk[(y - 2) * bw + x - 2] +
+                           w24[18] * blk[(y - 2) * bw + x + 2] +
+                           w24[19] * blk[(y - 3) * bw + x] +
+                           w24[20] * blk[(y - 3) * bw + x - 1] +
+                           w24[21] * blk[(y - 3) * bw + x + 1] +
+                           w24[22] * blk[(y - 3) * bw + x - 2] +
+                           w24[23]);
     default:
         return 0;
     }
@@ -348,11 +385,12 @@ int main(int argc, char* argv[]) {
             int mode = read_u8(fin);
             int ctx_mode = read_u8(fin);
             uint32_t payload_len = read_u32le(fin);
-            float w4[4] = {}, w5[5] = {}, w6[16] = {};
+            float w4[4] = {}, w5[5] = {}, w6[16] = {}, w24[24] = {};
             if (mode == 4) for (float& v : w4) v = read_float(fin);
             else if (mode == 6) for (float& v : w5) v = read_float(fin);
             else if (mode == 9) for (int i = 0; i < 6; i++) w6[i] = read_float(fin);
             else if (mode == 10) for (float& v : w6) v = read_float(fin);
+            else if (mode == 11) for (float& v : w24) v = read_float(fin);
 
             std::vector<uint8_t> payload(payload_len + 16, 0);
             if (!read_exact(fin, payload.data(), payload_len)) {
@@ -361,23 +399,26 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
-            AdaptModel hi_model;
-            hi_model.init();
-            std::vector<AdaptModel> lo_models(ctx_mode == 0 ? 1 : (ctx_mode == 1 ? 4 : 256));
+            bool hi_ctx = (ctx_mode >= 3);
+            int base_ctx = hi_ctx ? ctx_mode - 3 : ctx_mode;
+            std::vector<AdaptModel> hi_models(hi_ctx ? 4 : 1);
+            for (auto& m : hi_models) m.init();
+            std::vector<AdaptModel> lo_models(base_ctx == 0 ? 1 : (base_ctx == 1 ? 4 : 256));
             for (auto& m : lo_models) m.init();
             RangeDecoder dec;
             dec.init(payload.data());
 
             std::vector<uint16_t> blk(npix);
+            uint8_t prev_hi = 0;
             for (int y = 0; y < bh; y++) {
                 for (int x = 0; x < bw; x++) {
                     int idx = y * bw + x;
-                    uint16_t sym = decode_sym(dec, hi_model, lo_models, ctx_mode);
+                    uint16_t sym = decode_sym(dec, hi_models, lo_models, ctx_mode, prev_hi);
                     uint16_t pixel;
                     if (mode == 0) {
                         pixel = sym;
                     } else {
-                        uint16_t pred = predict_pixel(blk, bw, x, y, mode, gmean, w4, w5, w6);
+                        uint16_t pred = predict_pixel(blk, bw, x, y, mode, gmean, w4, w5, w6, w24);
                         int16_t rc = zagzig(sym);
                         pixel = (uint16_t)((int)pred + rc);
                     }

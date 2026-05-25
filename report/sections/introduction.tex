@@ -31,10 +31,14 @@ targeting a distinct point on the speed--ratio trade-off:
     least-squares — splits residuals into independent byte streams, and codes
     them with Finite State Entropy (FSE/tANS)~\cite{collet2013fse}.
     It balances speed and ratio (${\sim}187$\,ms, 3.40\,bpp).
-  \item \textbf{[Third codec]} extends the HAIS framework with a wider
-    predictor context and a cost function that directly models the
-    conditional entropy of the two byte streams. It prioritises compression
-    ratio at the cost of extra computation. (Section~\ref{sec:compression}.)
+  \item \textbf{APEX} evaluates 60 combinations of ten predictors
+    (including LS-16 with 16 spatial neighbours and LS-24 with 24 neighbours)
+    and six context strategies per block, selects the smallest, and uses an
+    LZMA-style adaptive range coder with Fenwick-tree models. Block size is
+    also optimised by trying eight candidates at compression time.
+    It prioritises compression ratio (${\sim}3.37$\,bpp) at the cost of a
+    slower compression pass (${\sim}6.6$\,s); decompression is fast
+    (${\sim}137$\,ms). (Section~\ref{sec:compression}.)
 \end{itemize}
 
 Section~\ref{sec:codecs} describes the three codecs in detail.

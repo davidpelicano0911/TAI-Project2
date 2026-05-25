@@ -127,14 +127,75 @@ Blocks are dispatched to a thread pool via a single
 \texttt{std::atomic<int>} counter with \texttt{fetch\_add}, writing results
 into pre-allocated per-block slots with no mutex required.
 
-% ── Third codec ───────────────────────────────────────────────────────────────
-\subsection{[Third Codec]: Compression-Focused}
+% ── APEX ──────────────────────────────────────────────────────────────────────
+\subsection{APEX: Compression-Focused}
 \label{sec:compression}
 
-% TODO: fill in when the third codec is complete.
-% Key design points to describe:
-%   - Extended predictor context (e.g. 6-tap LS: W, N, NW, WW, NN, bias)
-%   - Context-cost mode selection: cost = H(hi) + H(lo|hi=0)*p0 + H(lo|hi≠0)*(1-p0)
-%     directly models the entropy of the three-stream layout
-%   - Incompatible file format (different magic bytes)
-%   - Same parallel execution model as HAIS
+\subsubsection*{Two-Tier Architecture}
+APEX separates orchestration from compression. The outer \texttt{compress}
+binary runs the inner \texttt{range\_compress} engine eight times with block
+sizes $\{250, 300, 400, 500, 750, 1000, 1500, 2000\}$ pixels in parallel,
+retains the smallest result, and wraps it with a 5-byte \texttt{APX2} magic
+header. The corresponding \texttt{decompress} / \texttt{range\_decompress}
+pair inverts the process. This exhaustive search over block sizes incurs extra
+compression time but requires no tuning per image.
+
+\subsubsection*{Predictor Competition}
+For each block, APEX evaluates ten candidate predictors:
+
+\begin{description}[leftmargin=2em, labelindent=0em]
+  \item[Mode~0 (raw)] No prediction; symbols are raw pixel values.
+  \item[Mode~1 (avg)] $\hat{p} = \lfloor(W + N + NW + 1)/3\rfloor$.
+  \item[Mode~3 (gmean)] $\hat{p} = \bar{g}$, global image mean; removes bias pedestal.
+  \item[Mode~7 (GAP)] Gradient-adjusted prediction: selects among $W$, $N$, and
+    $W+N-NW$ based on the local horizontal and vertical gradient magnitudes.
+  \item[Mode~8 (MED)] JPEG-LS median predictor: $\hat{p} = \mathrm{median}(W, N, W+N-NW)$.
+  \item[Mode~4 (LS-4)] OLS with features $(W,N,NW,1)$; 4 float32 weights (16\,B overhead).
+  \item[Mode~6 (LS-5)] Adds $NE$ and $NN$; 5 weights (20\,B overhead).
+  \item[Mode~9 (LS-6)] OLS with $(W, N, NW, WW, NN, 1)$; 6 weights (24\,B overhead).
+    The second-order neighbours $WW$ and $NN$ capture slowly varying ramps.
+  \item[Mode~10 (LS-16)] 16-weight OLS spanning 4 pixels to the left, 7 pixels
+    in the row above (centred), 2 pixels two rows above, and a bias term
+    (64\,B overhead). Exploits long-range spatial structure in science frames.
+  \item[Mode~11 (LS-24)] 24-weight OLS extending LS-16 with 5 pixels to the left,
+    9 pixels in the row above, 5 pixels two rows above, and 4 pixels three rows
+    above (96\,B overhead). Captures wider spatial correlations.
+\end{description}
+
+All LS weights are solved per block via Gauss-Jordan elimination on the
+$N\times N$ normal equations; no external training data are required.
+Border pixels where the full neighbourhood is unavailable fall back to GAP.
+
+\subsubsection*{Context Modes and Block Competition}
+Each 16-bit zigzag residual is encoded byte-by-byte: first the high byte
+($z_h$), then the low byte ($z_l$). Six context strategies are tried,
+combining hi-byte and lo-byte conditioning:
+\begin{itemize}
+  \item \textbf{ctx~0}: single hi model; single lo model.
+  \item \textbf{ctx~1}: single hi model; four lo models keyed by
+    $z_h \in \{0\},\{1\text{--}2\},\{3\text{--}8\},\{>8\}$.
+  \item \textbf{ctx~2}: single hi model; 256 lo models (one per $z_h$ value).
+  \item \textbf{ctx~3--5}: same lo conditioning as ctx~0--2, but the hi byte
+    is coded with \emph{four} models conditioned on the previous hi byte
+    $z_h^{(t-1)}$ using the same four-bin scheme. This order-1 hi context
+    exploits spatial runs of similarly sized residuals.
+\end{itemize}
+Every block is compressed under all $10 \times 6 = 60$ mode/context
+combinations; the combination producing the smallest byte count is
+stored. Each block header records the chosen \texttt{mode} (1\,B) and
+\texttt{ctx\_mode} (1\,B) so the decoder can reproduce the exact prediction
+and model layout without side information.
+
+\subsubsection*{Entropy Coding: Adaptive Range Coder}
+APEX uses an LZMA-style range coder with a 32-bit range register and a
+64-bit low accumulator. Carry propagation is handled by a cache/pending
+chain: bytes whose top nibble is \texttt{0xFF} are held until a carry either
+flushes them as \texttt{0x00} or confirms them as \texttt{0xFF}.
+Renormalisation triggers when $\text{range} < 2^{24}$, emitting one output
+byte and shifting the range left by 8.
+
+The probability model is a 256-symbol adaptive Fenwick tree. Frequencies are
+initialised uniformly at 1. After each symbol, the count is incremented in
+$O(\log 256)$ time. When the running total reaches $2^{16}$, all frequencies
+are halved (minimum 1) and the tree is rebuilt, implementing a sliding-window
+aging mechanism that keeps the model responsive to local distribution shifts.
