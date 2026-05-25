@@ -15,14 +15,9 @@ $(TARGET): benchmark.cpp
 	$(CXX) $(CXXFLAGS) benchmark.cpp -o $(TARGET)
 
 current:
-	$(MAKE) -C ../hais
-	$(MAKE) -C ../hais2
-	$(MAKE) -C ../helix
-	$(MAKE) -C ../rais
-	$(MAKE) -C ../astra
-	$(MAKE) -C ../prism
-	$(MAKE) -C ../prism_block
-	$(MAKE) -C ../apex
+	$(MAKE) -C ../speed-focused
+	$(MAKE) -C ../all-rounder
+	$(MAKE) -C ../compression-focused
 
 check-tools:
 	@missing=0; \

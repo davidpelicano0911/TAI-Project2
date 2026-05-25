@@ -1,7 +1,7 @@
 CXX      = g++
 CXXFLAGS = -O3 -std=c++17 -pthread -Wall -Wextra
 
-all: compress decompress range_compress range_decompress
+all: compress decompress
 
 compress: compress.cpp
 	$(CXX) $(CXXFLAGS) -o compress compress.cpp
