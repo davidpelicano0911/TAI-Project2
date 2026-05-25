@@ -4,31 +4,18 @@
 #include <cstring>
 #include <string>
 #include <vector>
-#include <filesystem>
 #include <thread>
+#include <filesystem>
 #include <unistd.h>
-#include <sys/wait.h>
 
 namespace fs = std::filesystem;
 
-static constexpr uint8_t MAGIC[4] = {'A','P','X','2'};
+// Pull in range compression logic as a library (suppresses its main).
+#define RANGE_COMPRESS_LIB
+#include "range_compress.cpp"
+#undef RANGE_COMPRESS_LIB
 
-static std::string shell_quote(const std::string& s) {
-    std::string out = "'";
-    for (char c : s) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
-    }
-    out += "'";
-    return out;
-}
-
-static int run_cmd(const std::string& cmd) {
-    int ret = system(cmd.c_str());
-    if (ret == -1) return 1;
-    if (WIFEXITED(ret)) return WEXITSTATUS(ret);
-    return 1;
-}
+static constexpr uint8_t OUTER_MAGIC[4] = {'A','P','X','2'};
 
 static bool read_file(const fs::path& path, std::vector<uint8_t>& data) {
     FILE* f = fopen(path.c_str(), "rb");
@@ -43,12 +30,10 @@ static bool read_file(const fs::path& path, std::vector<uint8_t>& data) {
     return ok;
 }
 
-static bool write_wrapped(const char* out_path, uint8_t codec_id,
-                          const std::vector<uint8_t>& payload) {
+static bool write_wrapped(const char* out_path, const std::vector<uint8_t>& payload) {
     FILE* f = fopen(out_path, "wb");
     if (!f) return false;
-    fwrite(MAGIC, 1, 4, f);
-    fputc(codec_id, f);
+    fwrite(OUTER_MAGIC, 1, 4, f);
     fwrite(payload.data(), 1, payload.size(), f);
     fclose(f);
     return true;
@@ -61,75 +46,58 @@ static void remove_if_exists(const fs::path& p) {
 
 int main(int argc, char* argv[]) {
     if (argc != 3 && argc != 5) {
-        fprintf(stderr, "Usage: %s [n_rows n_cols] <input_raw> <output.apex>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [n_rows n_cols] <input_raw> <output>\n", argv[0]);
         return 1;
     }
 
+    int H = (argc == 5) ? std::atoi(argv[1]) : 1500;
+    int W = (argc == 5) ? std::atoi(argv[2]) : 1500;
     const char* src_path = (argc == 5) ? argv[3] : argv[1];
     const char* dst_path = (argc == 5) ? argv[4] : argv[2];
-    std::string dims     = (argc == 5) ? (std::string(argv[1]) + " " + std::string(argv[2]) + " ") : "";
 
-    fs::path exe      = fs::absolute(argv[0]).parent_path();
     fs::path tmp_base = fs::path("/tmp") / ("apex_" + std::to_string((long long)getpid()));
 
-    struct Candidate {
-        uint8_t    id;
-        fs::path   path;
-        std::string command;
-    };
+    static const int block_sizes[] = {250, 300, 400, 500, 750, 1000, 1500};
+    static const int n_bs = (int)(sizeof(block_sizes) / sizeof(block_sizes[0]));
 
-    std::string src = shell_quote(src_path);
-    std::string rc  = shell_quote((exe / "range_compress").string());
-
-    // cada block size escreve para o seu próprio ficheiro temporário
-    auto nvr = [&](int bs) -> fs::path {
+    auto tmp_path = [&](int bs) -> fs::path {
         fs::path p = tmp_base;
         p += "_" + std::to_string(bs) + ".nvr";
         return p;
     };
 
-    std::vector<Candidate> candidates = {
-        {9, nvr(250),  rc + " " + dims + src + " " + shell_quote(nvr(250).string())  + " 250  >/dev/null 2>/dev/null"},
-        {9, nvr(300),  rc + " " + dims + src + " " + shell_quote(nvr(300).string())  + " 300  >/dev/null 2>/dev/null"},
-        {9, nvr(400),  rc + " " + dims + src + " " + shell_quote(nvr(400).string())  + " 400  >/dev/null 2>/dev/null"},
-        {9, nvr(500),  rc + " " + dims + src + " " + shell_quote(nvr(500).string())  + " 500  >/dev/null 2>/dev/null"},
-        {9, nvr(750),  rc + " " + dims + src + " " + shell_quote(nvr(750).string())  + " 750  >/dev/null 2>/dev/null"},
-        {9, nvr(1000), rc + " " + dims + src + " " + shell_quote(nvr(1000).string()) + " 1000 >/dev/null 2>/dev/null"},
-        {9, nvr(1500), rc + " " + dims + src + " " + shell_quote(nvr(1500).string()) + " 1500 >/dev/null 2>/dev/null"},
-    };
+    // Remove any stale temp files.
+    for (int i = 0; i < n_bs; i++) remove_if_exists(tmp_path(block_sizes[i]));
 
-    // apaga ficheiros anteriores e lança os 4 em paralelo
-    for (const auto& c : candidates) remove_if_exists(c.path);
-
-    {
-        std::vector<std::thread> threads;
-        threads.reserve(candidates.size());
-        for (const auto& c : candidates)
-            threads.emplace_back([cmd = c.command]() { run_cmd(cmd); });
-        for (auto& t : threads) t.join();
+    // Run all block sizes in parallel.
+    std::vector<std::thread> threads;
+    threads.reserve(n_bs);
+    for (int i = 0; i < n_bs; i++) {
+        int bs = block_sizes[i];
+        std::string dst = tmp_path(bs).string();
+        threads.emplace_back([=]() {
+            range_compress_run(H, W, src_path, dst.c_str(), bs);
+        });
     }
+    for (auto& t : threads) t.join();
 
-    // escolhe o resultado mais pequeno
-    bool have_best = false;
-    uint8_t best_id = 0;
-    std::vector<uint8_t> best_payload;
-
-    for (const auto& c : candidates) {
+    // Pick the smallest result.
+    std::vector<uint8_t> best;
+    for (int i = 0; i < n_bs; i++) {
+        fs::path p = tmp_path(block_sizes[i]);
         std::vector<uint8_t> payload;
-        if (!read_file(c.path, payload)) { remove_if_exists(c.path); continue; }
-        if (!have_best || payload.size() < best_payload.size()) {
-            have_best = true;
-            best_id   = c.id;
-            best_payload.swap(payload);
+        if (read_file(p, payload)) {
+            if (best.empty() || payload.size() < best.size())
+                best.swap(payload);
         }
-        remove_if_exists(c.path);
+        remove_if_exists(p);
     }
 
-    if (!have_best) {
+    if (best.empty()) {
         fprintf(stderr, "apex: all candidate compressors failed\n");
         return 1;
     }
-    if (!write_wrapped(dst_path, best_id, best_payload)) {
+    if (!write_wrapped(dst_path, best)) {
         fprintf(stderr, "apex: cannot write %s\n", dst_path);
         return 1;
     }

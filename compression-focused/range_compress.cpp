@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -7,10 +8,120 @@
 #include <thread>
 #include <vector>
 
-#include "../hais2/model/CompressorModel.hpp"
+// ---------------------------------------------------------------------------
+// Self-contained predictor helpers
+// ---------------------------------------------------------------------------
+
+static inline uint16_t zigzag(int16_t v) {
+    return (v >= 0) ? (uint16_t)(v * 2) : (uint16_t)((-v) * 2 - 1);
+}
+static inline int16_t zagzig(uint16_t u) {
+    return (u & 1) ? -(int16_t)((u + 1) / 2) : (int16_t)(u / 2);
+}
+static inline uint16_t clamp_float(float p) {
+    return (uint16_t)(int)std::max(0.0f, std::min(65535.0f, p + 0.5f));
+}
+static inline uint16_t avg_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
+    if (y == 0 && x == 0) return 0;
+    if (y == 0) return blk[x - 1];
+    if (x == 0) return blk[(y - 1) * bw + x];
+    int A = blk[y * bw + (x - 1)];
+    int B = blk[(y - 1) * bw + x];
+    int C = blk[(y - 1) * bw + (x - 1)];
+    return (uint16_t)((A + B + C + 1) / 3);
+}
+static inline uint16_t gap_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
+    if (y == 0 && x == 0) return 0;
+    if (y == 0) return blk[x - 1];
+    if (x == 0) return blk[(y - 1) * bw];
+    int W  = blk[y * bw + (x - 1)];
+    int N  = blk[(y - 1) * bw + x];
+    int NW = blk[(y - 1) * bw + (x - 1)];
+    int dh = std::abs(W - NW);
+    int dv = std::abs(N - NW);
+    int pred;
+    if (dv > 2 * dh) pred = W;
+    else if (dh > 2 * dv) pred = N;
+    else pred = (int)std::round(((dv + 1.0) * W + (dh + 1.0) * N) / (dv + dh + 2.0));
+    return (uint16_t)std::max(std::min(W, N), std::min(std::max(W, N), pred));
+}
+static inline uint16_t med_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
+    if (y == 0 && x == 0) return 0;
+    if (y == 0) return blk[x - 1];
+    if (x == 0) return blk[(y - 1) * bw];
+    int W  = blk[y * bw + (x - 1)];
+    int N  = blk[(y - 1) * bw + x];
+    int NW = blk[(y - 1) * bw + (x - 1)];
+    int p  = W + N - NW;
+    return (uint16_t)std::max({std::min(W, N), std::min(std::max(W, N), p)});
+}
+
+template<int N>
+static void ls_solve(double XtX[N][N], double Xty[N], float w[N]) {
+    double M[N][N + 1];
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) M[i][j] = XtX[i][j];
+        M[i][N] = Xty[i];
+    }
+    for (int col = 0; col < N; col++) {
+        int piv = col;
+        for (int r = col + 1; r < N; r++)
+            if (std::abs(M[r][col]) > std::abs(M[piv][col])) piv = r;
+        if (piv != col)
+            for (int k = 0; k <= N; k++) std::swap(M[col][k], M[piv][k]);
+        double d = M[col][col];
+        if (std::abs(d) < 1e-8) { w[col] = 0.0f; continue; }
+        for (int r = 0; r < N; r++) {
+            if (r == col) continue;
+            double f = M[r][col] / d;
+            for (int k = col; k <= N; k++) M[r][k] -= f * M[col][k];
+        }
+    }
+    for (int i = 0; i < N; i++)
+        w[i] = (std::abs(M[i][i]) > 1e-8) ? (float)(M[i][N] / M[i][i]) : 0.0f;
+}
+
+static void ls6_compute(const std::vector<uint16_t>& blk, int bw, int bh,
+                        float w[6], std::vector<uint16_t>& syms) {
+    double XtX[6][6] = {}, Xty[6] = {};
+    for (int y = 2; y < bh; y++)
+        for (int x = 2; x < bw; x++) {
+            double f[6] = {
+                (double)blk[y * bw + (x - 1)],
+                (double)blk[(y - 1) * bw + x],
+                (double)blk[(y - 1) * bw + (x - 1)],
+                (double)blk[y * bw + (x - 2)],
+                (double)blk[(y - 2) * bw + x],
+                1.0
+            };
+            double t = blk[y * bw + x];
+            for (int i = 0; i < 6; i++) {
+                Xty[i] += f[i] * t;
+                for (int j = 0; j < 6; j++) XtX[i][j] += f[i] * f[j];
+            }
+        }
+    ls_solve<6>(XtX, Xty, w);
+    syms.resize((size_t)bw * bh);
+    for (int y = 0; y < bh; y++)
+        for (int x = 0; x < bw; x++) {
+            int idx = y * bw + x;
+            uint16_t pred;
+            if (y < 2 || x < 2)
+                pred = gap_pred(blk, x, y, bw);
+            else {
+                float p = w[0] * blk[y * bw + (x - 1)]
+                        + w[1] * blk[(y - 1) * bw + x]
+                        + w[2] * blk[(y - 1) * bw + (x - 1)]
+                        + w[3] * blk[y * bw + (x - 2)]
+                        + w[4] * blk[(y - 2) * bw + x]
+                        + w[5];
+                pred = clamp_float(p);
+            }
+            syms[idx] = zigzag((int16_t)(blk[idx] - pred));
+        }
+}
 
 // Range encoder / decoder — LZMA-style carry propagation.
-// Lifted from prism/compress.cpp & prism/decompress.cpp with minor cleanup.
 
 #include <cstdint>
 #include <cstdlib>
@@ -279,10 +390,67 @@ static void add_weights(std::vector<uint8_t>& out, const float* w, int n) {
     for (int i = 0; i < n; i++) put_float(out, w[i]);
 }
 
-static uint16_t clamp_float(float p) {
-    if (p < 0.0f) return 0;
-    if (p > 65535.0f) return 65535;
-    return (uint16_t)(int)(p + 0.5f);
+static void ls4_compute(const std::vector<uint16_t>& blk, int bw, int bh,
+                        float w[4], std::vector<uint16_t>& syms) {
+    double XtX[4][4] = {}, Xty[4] = {};
+    for (int y = 1; y < bh; y++)
+        for (int x = 1; x < bw; x++) {
+            double f[4] = { (double)blk[y*bw+(x-1)], (double)blk[(y-1)*bw+x],
+                            (double)blk[(y-1)*bw+(x-1)], 1.0 };
+            double t = blk[y * bw + x];
+            for (int i = 0; i < 4; i++) { for (int j = 0; j < 4; j++) XtX[i][j] += f[i]*f[j]; Xty[i] += f[i]*t; }
+        }
+    ls_solve<4>(XtX, Xty, w);
+    syms.resize((size_t)bw * bh);
+    for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+        int idx = y * bw + x;
+        uint16_t pred;
+        if (y == 0 && x == 0) pred = clamp_float(w[3]);
+        else if (y == 0) pred = clamp_float(w[0]*blk[x-1] + w[3]);
+        else if (x == 0) pred = clamp_float(w[1]*blk[(y-1)*bw+x] + w[3]);
+        else pred = clamp_float(w[0]*blk[y*bw+(x-1)] + w[1]*blk[(y-1)*bw+x] + w[2]*blk[(y-1)*bw+(x-1)] + w[3]);
+        syms[idx] = zigzag((int16_t)(blk[idx] - pred));
+    }
+}
+
+static void ls5_compute(const std::vector<uint16_t>& blk, int bw, int bh,
+                        float w[5], std::vector<uint16_t>& syms) {
+    double XtX[5][5] = {}, Xty[5] = {};
+    for (int y = 2; y < bh; y++)
+        for (int x = 1; x < bw - 1; x++) {
+            double f[5] = { (double)blk[y*bw+(x-1)], (double)blk[(y-1)*bw+x],
+                            (double)blk[(y-1)*bw+(x-1)], (double)blk[(y-1)*bw+(x+1)],
+                            (double)blk[(y-2)*bw+x] };
+            double t = blk[y * bw + x];
+            for (int i = 0; i < 5; i++) { for (int j = 0; j < 5; j++) XtX[i][j] += f[i]*f[j]; Xty[i] += f[i]*t; }
+        }
+    ls_solve<5>(XtX, Xty, w);
+    syms.resize((size_t)bw * bh);
+    for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+        int idx = y * bw + x;
+        uint16_t pred;
+        if (y < 2 || x < 1 || x >= bw - 1) pred = gap_pred(blk, x, y, bw);
+        else pred = clamp_float(w[0]*blk[y*bw+(x-1)] + w[1]*blk[(y-1)*bw+x]
+                              + w[2]*blk[(y-1)*bw+(x-1)] + w[3]*blk[(y-1)*bw+(x+1)]
+                              + w[4]*blk[(y-2)*bw+x]);
+        syms[idx] = zigzag((int16_t)(blk[idx] - pred));
+    }
+}
+
+static void make_syms(const std::vector<uint16_t>& blk, int mode,
+                      int bw, int bh, std::vector<uint16_t>& syms, uint16_t gmean) {
+    syms.resize((size_t)bw * bh);
+    for (int y = 0; y < bh; y++) for (int x = 0; x < bw; x++) {
+        int idx = y * bw + x;
+        uint16_t pix = blk[idx];
+        uint16_t pred;
+        if (mode == 0) pred = 0;
+        else if (mode == 3) pred = gmean;
+        else if (mode == 1) pred = avg_pred(blk, x, y, bw);
+        else if (mode == 7) pred = gap_pred(blk, x, y, bw);
+        else pred = med_pred(blk, x, y, bw); // mode 8
+        syms[idx] = zigzag((int16_t)(pix - pred));
+    }
 }
 
 static void ls16_compute(const std::vector<uint16_t>& blk, int bw, int bh,
@@ -490,22 +658,11 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
     return best;
 }
 
-int main(int argc, char* argv[]) {
-    // Suporta duas formas:
-    //   range_compress n_rows n_cols input output [block_size]  (argc 5 ou 6)
-    //   range_compress input output [block_size]                (argc 3 ou 4, backward compat)
-    if (argc < 3 || argc > 6 || argc == 2) {
-        fprintf(stderr, "Usage: %s [n_rows n_cols] <input_raw> <output.nvr> [block_size]\n", argv[0]);
-        return 1;
-    }
-
-    bool has_dims = (argc == 5 || argc == 6) && std::atoi(argv[1]) > 0;
-    int  n_rows_arg = has_dims ? std::atoi(argv[1]) : 0;
-    int  n_cols_arg = has_dims ? std::atoi(argv[2]) : 0;
-    const char* src_arg = has_dims ? argv[3] : argv[1];
-    const char* dst_arg = has_dims ? argv[4] : argv[2];
-    int  bs_arg = (has_dims && argc == 6) ? std::atoi(argv[5]) :
-                  (!has_dims && argc == 4) ? std::atoi(argv[3]) : 0;
+// Callable entry point used by the outer compress binary.
+// Returns 0 on success, non-zero on error.
+int range_compress_run(int H, int W, const char* src_arg, const char* dst_arg, int bs_arg) {
+    const bool has_dims = true;
+    (void)has_dims;
 
     FILE* fin = fopen(src_arg, "rb");
     if (!fin) { fprintf(stderr, "Cannot open %s\n", src_arg); return 1; }
@@ -513,17 +670,8 @@ int main(int argc, char* argv[]) {
     long fsize = ftell(fin);
     rewind(fin);
 
-    int W = 0, H = 0;
-    if (has_dims) {
-        H = n_rows_arg;
-        W = n_cols_arg;
-        if (W <= 0 || H <= 0 || fsize != (long)W * H * 2) {
-            fprintf(stderr, "Dimensions %dx%d don't match file size %ld\n", W, H, fsize);
-            fclose(fin);
-            return 1;
-        }
-    } else if (!infer_dims(fsize, W, H)) {
-        fprintf(stderr, "Cannot infer image dimensions — use: %s n_rows n_cols ...\n", argv[0]);
+    if (W <= 0 || H <= 0 || fsize != (long)W * H * 2) {
+        fprintf(stderr, "Dimensions %dx%d don't match file size %ld\n", W, H, fsize);
         fclose(fin);
         return 1;
     }
@@ -590,3 +738,16 @@ int main(int argc, char* argv[]) {
     fclose(fout);
     return 0;
 }
+
+#ifndef RANGE_COMPRESS_LIB
+int main(int argc, char* argv[]) {
+    if (argc < 5 || argc > 6) {
+        fprintf(stderr, "Usage: %s <n_rows> <n_cols> <input_raw> <output.nvr> [block_size]\n", argv[0]);
+        return 1;
+    }
+    int H = std::atoi(argv[1]);
+    int W = std::atoi(argv[2]);
+    int bs = (argc == 6) ? std::atoi(argv[5]) : 0;
+    return range_compress_run(H, W, argv[3], argv[4], bs);
+}
+#endif

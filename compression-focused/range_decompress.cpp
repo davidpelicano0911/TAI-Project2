@@ -1,14 +1,57 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 
-#include "../hais2/model/Predictors.hpp"
+// ---------------------------------------------------------------------------
+// Self-contained predictor helpers
+// ---------------------------------------------------------------------------
+
+static inline uint16_t zigzag(int16_t v) {
+    return (v >= 0) ? (uint16_t)(v * 2) : (uint16_t)((-v) * 2 - 1);
+}
+static inline int16_t zagzig(uint16_t u) {
+    return (u & 1) ? -(int16_t)((u + 1) / 2) : (int16_t)(u / 2);
+}
+static inline uint16_t avg_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
+    if (y == 0 && x == 0) return 0;
+    if (y == 0) return blk[x - 1];
+    if (x == 0) return blk[(y - 1) * bw + x];
+    int A = blk[y * bw + (x - 1)];
+    int B = blk[(y - 1) * bw + x];
+    int C = blk[(y - 1) * bw + (x - 1)];
+    return (uint16_t)((A + B + C + 1) / 3);
+}
+static inline uint16_t gap_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
+    if (y == 0 && x == 0) return 0;
+    if (y == 0) return blk[x - 1];
+    if (x == 0) return blk[(y - 1) * bw];
+    int W  = blk[y * bw + (x - 1)];
+    int N  = blk[(y - 1) * bw + x];
+    int NW = blk[(y - 1) * bw + (x - 1)];
+    int dh = std::abs(W - NW);
+    int dv = std::abs(N - NW);
+    int pred;
+    if (dv > 2 * dh) pred = W;
+    else if (dh > 2 * dv) pred = N;
+    else pred = (int)std::round(((dv + 1.0) * W + (dh + 1.0) * N) / (dv + dh + 2.0));
+    return (uint16_t)std::max(std::min(W, N), std::min(std::max(W, N), pred));
+}
+static inline uint16_t med_pred(const std::vector<uint16_t>& blk, int x, int y, int bw) {
+    if (y == 0 && x == 0) return 0;
+    if (y == 0) return blk[x - 1];
+    if (x == 0) return blk[(y - 1) * bw];
+    int W  = blk[y * bw + (x - 1)];
+    int N  = blk[(y - 1) * bw + x];
+    int NW = blk[(y - 1) * bw + (x - 1)];
+    int p  = W + N - NW;
+    return (uint16_t)std::max({std::min(W, N), std::min(std::max(W, N), p)});
+}
 
 // Range encoder / decoder — LZMA-style carry propagation.
-// Lifted from prism/compress.cpp & prism/decompress.cpp with minor cleanup.
 
 #include <cstdint>
 #include <cstdlib>
@@ -354,14 +397,9 @@ static uint16_t predict_pixel(const std::vector<uint16_t>& blk,
     }
 }
 
-int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <input.nvr> <output_raw>\n", argv[0]);
-        return 1;
-    }
-
-    FILE* fin = fopen(argv[1], "rb");
-    if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[1]); return 1; }
+int range_decompress_run(const char* in_path, const char* out_path) {
+    FILE* fin = fopen(in_path, "rb");
+    if (!fin) { fprintf(stderr, "Cannot open %s\n", in_path); return 1; }
     uint8_t magic[4];
     if (!read_exact(fin, magic, 4) || memcmp(magic, MAGIC, 4) != 0) {
         fprintf(stderr, "Bad APR magic\n");
@@ -433,8 +471,8 @@ int main(int argc, char* argv[]) {
     }
     fclose(fin);
 
-    FILE* fout = fopen(argv[2], "wb");
-    if (!fout) { fprintf(stderr, "Cannot open %s\n", argv[2]); return 1; }
+    FILE* fout = fopen(out_path, "wb");
+    if (!fout) { fprintf(stderr, "Cannot open %s\n", out_path); return 1; }
     for (uint16_t px : image) {
         uint8_t b[2] = {(uint8_t)(px >> 8), (uint8_t)(px & 255)};
         fwrite(b, 1, 2, fout);
@@ -442,3 +480,13 @@ int main(int argc, char* argv[]) {
     fclose(fout);
     return 0;
 }
+
+#ifndef RANGE_DECOMPRESS_LIB
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <input.nvr> <output_raw>\n", argv[0]);
+        return 1;
+    }
+    return range_decompress_run(argv[1], argv[2]);
+}
+#endif

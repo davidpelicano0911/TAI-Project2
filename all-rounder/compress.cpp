@@ -149,18 +149,20 @@ static int choose_block_size(int W, int H) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc != 5) {
-        fprintf(stderr, "Usage: %s <n_rows> <n_cols> <input> <output>\n", argv[0]);
+    if (argc != 3 && argc != 5) {
+        fprintf(stderr, "Usage: %s [n_rows n_cols] <input> <output>\n", argv[0]);
         return 1;
     }
 
-    int H = std::atoi(argv[1]);   // n_rows
-    int W = std::atoi(argv[2]);   // n_cols
+    int H = (argc == 5) ? std::atoi(argv[1]) : 1500;
+    int W = (argc == 5) ? std::atoi(argv[2]) : 1500;
+    const char* in_path  = (argc == 5) ? argv[3] : argv[1];
+    const char* out_path = (argc == 5) ? argv[4] : argv[2];
     if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); return 1; }
 
     // Read input.
-    FILE* fin = fopen(argv[3], "rb");
-    if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[3]); return 1; }
+    FILE* fin = fopen(in_path, "rb");
+    if (!fin) { fprintf(stderr, "Cannot open %s\n", in_path); return 1; }
     fseek(fin, 0, SEEK_END); long fsize = ftell(fin); rewind(fin);
 
     if (fsize != (long)W * H * 2) {
@@ -201,8 +203,8 @@ int main(int argc, char* argv[]) {
     for (auto& t : pool) t.join();
 
     // Write output.
-    FILE* fout = fopen(argv[4], "wb");
-    if (!fout) { fprintf(stderr, "Cannot open %s\n", argv[4]); return 1; }
+    FILE* fout = fopen(out_path, "wb");
+    if (!fout) { fprintf(stderr, "Cannot open %s\n", out_path); return 1; }
 
     fwrite(MAGIC, 1, 4, fout);
     write_u32le(fout, (uint32_t)W);
@@ -221,7 +223,7 @@ int main(int argc, char* argv[]) {
     fclose(fout);
 
     long in_bytes  = (long)W * H * 2;
-    FILE* ft = fopen(argv[4], "rb"); fseek(ft, 0, SEEK_END); long out_bytes = ftell(ft); fclose(ft);
+    FILE* ft = fopen(out_path, "rb"); fseek(ft, 0, SEEK_END); long out_bytes = ftell(ft); fclose(ft);
     fprintf(stderr, "Dimensions: %dx%d  blocks: %dx%d (%d total)\n",
             W, H, blocks_x, blocks_y, total);
     fprintf(stderr, "Modes: raw=%d avg=%d mean=%d ls4=%d ls5=%d  ctx=%d/%d\n",
