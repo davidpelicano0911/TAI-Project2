@@ -13,40 +13,51 @@ distribution near zero regardless of sign.
 \subsection{prism-block: Speed-Focused}
 \label{sec:speed}
 
-\paragraph{Partitioning and parallelism.}
-The image is split into horizontal bands of 150 rows each (10 bands for
-$1500\times1500$). Bands are compressed independently; a shared
-\texttt{std::atomic<int>} counter distributes bands to threads via
-\texttt{fetch\_add}, achieving lock-free load balancing.
+The design of prism-block centres on one principle: every horizontal strip of
+150 rows is entirely self-contained, so any number of strips can be compressed
+simultaneously without coordination. A shared \texttt{std::atomic<int>} counter
+distributes work to a thread pool via \texttt{fetch\_add}, achieving lock-free
+load balancing with no mutex overhead. Figure~\ref{fig:prismblock} illustrates
+the full pipeline.
 
-\paragraph{Predictor.}
-Each pixel is predicted by the \emph{Gradient-Adjusted Prediction} (GAP)
-function of its three decoded neighbours: left ($W$), above ($N$),
-and above-left ($NW$). Horizontal and vertical gradients are estimated as
-$d_h = |W - NW|$ and $d_v = |N - NW|$. When one gradient dominates
-($d_h > 2d_v$ or $d_v > 2d_h$), the perpendicular neighbour is used
-directly; otherwise a gradient-weighted blend is computed and clamped:
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figs/fast_diagram.png}
+  \caption{End-to-end pipeline of prism-block. The image is partitioned into
+  horizontal strips processed in parallel; within each strip every pixel
+  follows the same predict -- residualise -- zigzag -- split -- encode path.}
+  \label{fig:prismblock}
+\end{figure}
+
+
+Within each strip, pixels are predicted using the \emph{Gradient-Adjusted
+Prediction} (GAP) function of three causal neighbours: left ($W$), above ($N$),
+and above-left ($NW$). GAP estimates horizontal and vertical gradients as
+$d_h = |W - NW|$ and $d_v = |N - NW|$, and when one gradient strongly
+dominates ($d_h > 2d_v$ or $d_v > 2d_h$) it falls back to the perpendicular
+neighbour directly. Otherwise it computes a gradient-weighted blend clamped to
+the range $[\min(W,N),\max(W,N)]$:
 \[
   \hat{p} = \operatorname{clamp}\!\left(
     \frac{(d_v+1)\,W + (d_h+1)\,N}{d_v+d_h+2},\;
     \min(W,N),\;\max(W,N)\right).
 \]
-This predictor handles edges and flat regions without a mode switch.
+This single formula handles both smooth regions and edges without any
+explicit mode switch.
 
-\paragraph{Entropy coding.}
-After zigzag encoding, each 16-bit symbol $z$ is split into
-$z_h = z \gg 8$ (high byte) and $z_l = z\;\&\;0\!\mathrm{xFF}$ (low byte).
-Both bytes are coded with a carry-based range coder backed by adaptive
-Fenwick-tree models. $z_h$ uses a single shared model.
-$z_l$ is conditioned on the magnitude of the two preceding residuals:
+The signed residual is zigzag-mapped to a 16-bit unsigned symbol and split
+into a high byte $z_h = z \gg 8$ and a low byte $z_l = z\;\&\;0\text{xFF}$.
+Both are coded with a carry-propagation range coder backed by adaptive
+Fenwick-tree frequency models. The high byte uses one shared model across all
+pixels in the strip, while the low byte selects among eight context models
+conditioned on the sum of the two neighbouring residual magnitudes:
 \[
   c = \operatorname{bin}(|\hat{r}_W| + |\hat{r}_N|),
 \]
-yielding eight context models whose bin boundaries are
-$\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
+with bin boundaries $\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
 \{33\text{--}64\},\{65\text{--}128\},\{129\text{--}512\},\{>512\}$.
-Each model halves all counts when the running total reaches $2^{16}$,
-tracking distribution shifts adaptively within a band.
+Each model halves all counts when the running total reaches $2^{16}$, keeping
+the frequency estimates responsive to distribution shifts within a strip.
 
 % ── HAIS ──────────────────────────────────────────────────────────────────────
 \subsection{HAIS: Balanced}
