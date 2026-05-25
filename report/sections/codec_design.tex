@@ -128,17 +128,28 @@ Blocks are dispatched to a thread pool via a single
 into pre-allocated per-block slots with no mutex required.
 
 % ── compression-focused ──────────────────────────────────────────────────────
-\subsection{compression-focused: Best Ratio}
+\subsection{compression-focused: Compression Focused}
 \label{sec:compression}
 
-\subsubsection*{Two-Tier Architecture}
 compression-focused separates orchestration from compression. The outer \texttt{compress}
-binary runs the inner \texttt{range\_compress} engine eight times with block
+binary runs the inner \texttt{range\_compress} engine seven times with block
 sizes $\{250, 300, 400, 500, 750, 1000, 1500\}$ pixels in parallel,
-retains the smallest result, and wraps it with a 5-byte \texttt{APX2} magic
+retains the smallest result, and wraps it with a 5-byte magic
 header. The corresponding \texttt{decompress} / \texttt{range\_decompress}
 pair inverts the process. This exhaustive search over block sizes incurs extra
 compression time but requires no tuning per image.
+
+Figure~\ref{fig:compression_flow} summarises the full pipeline.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{figs/compression_focused_diagram.png}
+  \caption{compression-focused pipeline. The outer search runs \texttt{range\_compress}
+  seven times in parallel (one per block size) and retains the smallest output.
+  Inside each run, every block is compressed under all $10 \times 6 = 60$
+  predictor/context combinations and the best is stored in the block header.}
+  \label{fig:compression_flow}
+\end{figure}
 
 \subsubsection*{Predictor Competition}
 For each block, compression-focused evaluates ten candidate predictors:

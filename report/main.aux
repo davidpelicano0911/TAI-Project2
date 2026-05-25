@@ -1,5 +1,5 @@
 \relax 
-\providecommand \babel@aux [2]{\global \let \babel@toc \@gobbletwo }
+\providecommand\babel@aux[2]{}
 \@nameuse{bbl@beforestart}
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
@@ -18,8 +18,10 @@
 \newlabel{fig:prismblock}{{1}{2}{End-to-end pipeline of speed-focused. The image is partitioned into horizontal strips processed in parallel; within each strip every pixel follows the same predict -- residualise -- zigzag -- split -- encode path}{figure.caption.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.2}all-rounder: Balanced}{2}{subsection.2.2}\protected@file@percent }
 \newlabel{sec:balanced}{{2.2}{2}{all-rounder: Balanced}{subsection.2.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}APEX: Compression-Focused}{3}{subsection.2.3}\protected@file@percent }
-\newlabel{sec:compression}{{2.3}{3}{APEX: Compression-Focused}{subsection.2.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}compression-focused: Compression Focused}{3}{subsection.2.3}\protected@file@percent }
+\newlabel{sec:compression}{{2.3}{3}{compression-focused: Compression Focused}{subsection.2.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces compression-focused pipeline. The outer search runs \texttt  {range\_compress} seven times in parallel (one per block size) and retains the smallest output. Inside each run, every block is compressed under all $10 \times 6 = 60$ predictor/context combinations and the best is stored in the block header.}}{3}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:compression_flow}{{2}{3}{compression-focused pipeline. The outer search runs \texttt {range\_compress} seven times in parallel (one per block size) and retains the smallest output. Inside each run, every block is compressed under all $10 \times 6 = 60$ predictor/context combinations and the best is stored in the block header}{figure.caption.7}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Experimental Setup}{4}{section.3}\protected@file@percent }
 \newlabel{sec:setup}{{3}{4}{Experimental Setup}{section.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Dataset}{4}{subsection.3.1}\protected@file@percent }
@@ -27,8 +29,8 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Evaluation Protocol}{4}{subsection.3.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {4}Results}{4}{section.4}\protected@file@percent }
 \newlabel{sec:results}{{4}{4}{Results}{section.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Average compression ratio and runtimes across the eight benchmark images (A--H). Lower is better in all columns. Our codecs are in bold.}}{4}{table.caption.11}\protected@file@percent }
-\newlabel{tab:results}{{1}{4}{Average compression ratio and runtimes across the eight benchmark images (A--H). Lower is better in all columns. Our codecs are in bold}{table.caption.11}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Average compression ratio and runtimes across the eight benchmark images (A--H). Lower is better in all columns. Our codecs are in bold.}}{5}{table.caption.11}\protected@file@percent }
+\newlabel{tab:results}{{1}{5}{Average compression ratio and runtimes across the eight benchmark images (A--H). Lower is better in all columns. Our codecs are in bold}{table.caption.11}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Discussion and Conclusion}{5}{section.5}\protected@file@percent }
 \newlabel{sec:discussion}{{5}{5}{Discussion and Conclusion}{section.5}{}}
 \@writefile{toc}{\contentsline {paragraph}{Why domain-specific codecs win.}{5}{section*.12}\protected@file@percent }

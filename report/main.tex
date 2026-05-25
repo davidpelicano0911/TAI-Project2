@@ -76,9 +76,10 @@ coder, reaching 3.505\,bpp in 55\,ms total.
 including training-free least-squares with up to five spatial taps --- and
 codes residuals with Finite State Entropy (tANS), achieving 3.400\,bpp in
 102\,ms.
-\textbf{compression-focused} extends all-rounder with a six-tap
-least-squares predictor and a context-aware cost estimator, reaching
-3.367\,bpp.
+\textbf{compression-focused} exhaustively searches $10$ predictors
+(including LS models with up to 24 spatial taps) and $6$ context
+strategies per block, across $7$ candidate block sizes run in parallel,
+achieving 3.367\,bpp at the cost of a slower compression pass.
 All three codecs outperform every tested general-purpose compressor in
 compression ratio, with all-rounder and speed-focused also beating bzip2-9
 and xz-6 in total runtime.
