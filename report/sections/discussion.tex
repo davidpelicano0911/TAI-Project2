@@ -28,9 +28,9 @@ structural choice. After a good prediction, hi8 is near-uniform zero,
 yielding a near-zero-entropy stream (often a 2-byte single-symbol FSE packet);
 all useful variation is carried by lo8. The context FSE variant conditions
 lo8 on whether hi8 is zero, exploiting the bimodal structure of the lo8
-distribution. prism-block achieves the same effect via eight adaptive context
+distribution. speed-focused achieves the same effect via eight adaptive context
 models without transmitting a frequency table, trading $2.3\times$ speed for
-$0.11$\,bpp less compression compared to HAIS.
+$0.11$\,bpp less compression compared to all-rounder.
 
 \paragraph{Limitations.}
 The corpus covers only 8 images from a single training set; rankings may
@@ -40,10 +40,12 @@ include process-launch overhead for the generic tools.
 
 \paragraph{Conclusion.}
 Specialised predictive compression outperforms general-purpose tools on raw
-astronomical imagery. HAIS achieves 3.40\,bpp versus 4.00\,bpp for zstd-19,
-a 15\% reduction, while remaining $14\times$ faster than xz-9. The dominant
+astronomical imagery. all-rounder achieves 3.40\,bpp versus 4.49\,bpp for zstd-1,
+a 24\% reduction, while remaining $17\times$ faster than xz-6. The dominant
 gain comes from the predictor: global mean removal alone handles most
 calibration frames; least-squares adaptation provides further gains on
 science images. The entropy coder contributes relatively little once residuals
-are well predicted. Completing and benchmarking the third codec is the
-immediate next step.
+are well predicted. compression-focused pushes the ratio further to 3.37\,bpp
+by exhaustively searching over predictors, block sizes, and context strategies
+at compression time, demonstrating that most of the remaining gap to the
+information-theoretic limit lies in predictor quality rather than entropy coding.

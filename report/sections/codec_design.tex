@@ -9,11 +9,11 @@ Zigzag maps small-magnitude residuals — which are the common case after a
 good prediction — to small unsigned integers, concentrating the symbol
 distribution near zero regardless of sign.
 
-% ── prism-block ───────────────────────────────────────────────────────────────
-\subsection{prism-block: Speed-Focused}
+% ── speed-focused ───────────────────────────────────────────────────────────────
+\subsection{speed-focused: Speed-Focused}
 \label{sec:speed}
 
-The design of prism-block centres on one principle: every horizontal strip of
+The design of speed-focused centres on one principle: every horizontal strip of
 150 rows is entirely self-contained, so any number of strips can be compressed
 simultaneously without coordination. A shared \texttt{std::atomic<int>} counter
 distributes work to a thread pool via \texttt{fetch\_add}, achieving lock-free
@@ -23,7 +23,7 @@ the full pipeline.
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{figs/fast_diagram.png}
-  \caption{End-to-end pipeline of prism-block. The image is partitioned into
+  \caption{End-to-end pipeline of speed-focused. The image is partitioned into
   horizontal strips processed in parallel; within each strip every pixel
   follows the same predict -- residualise -- zigzag -- split -- encode path.}
   \label{fig:prismblock}
@@ -60,18 +60,18 @@ Each model halves all counts when the running total reaches $2^{16}$, keeping
 the frequency estimates responsive to distribution shifts within a strip.
 
 % ── HAIS ──────────────────────────────────────────────────────────────────────
-\subsection{HAIS: Balanced}
+\subsection{all-rounder: Balanced}
 \label{sec:balanced}
 
 \subsubsection*{Block Selection}
-HAIS requires explicit $n\_rows$ and $n\_cols$ arguments, which are stored in
+all-rounder requires explicit $n\_rows$ and $n\_cols$ arguments, which are stored in
 the compressed header so the decoder needs no additional input.
 It then selects the largest block side $b\le512$ that divides both $W$ and $H$
 exactly and yields at least four blocks. For $1500\times1500$ this gives
 $b=500$, producing a $3\times3$ grid of nine blocks of 500$\times$500 pixels.
 
 \subsubsection*{Predictive Modes}
-For each block, HAIS evaluates five candidate predictors and retains the one
+For each block, all-rounder evaluates five candidate predictors and retains the one
 with the lowest estimated coding cost (defined below).
 
 \begin{description}[leftmargin=2em, labelindent=0em]
@@ -115,7 +115,7 @@ $\text{nnz}\times5$\,B symbol--frequency pairs); or \emph{dense}
 \subsubsection*{Context FSE}
 Because the high byte of a small residual is almost always zero, the lo8
 distribution differs substantially depending on whether $\mathrm{hi}=0$.
-When the fraction of zero high bytes falls between 2\% and 98\%, HAIS
+When the fraction of zero high bytes falls between 2\% and 98\%, all-rounder
 builds two conditional lo8 streams — $\texttt{lo\_zero}$
 (pixels with $\mathrm{hi}=0$) and $\texttt{lo\_nonzero}$ — and uses the
 three-stream layout only if its compressed size is strictly smaller than the
@@ -127,12 +127,12 @@ Blocks are dispatched to a thread pool via a single
 \texttt{std::atomic<int>} counter with \texttt{fetch\_add}, writing results
 into pre-allocated per-block slots with no mutex required.
 
-% ── APEX ──────────────────────────────────────────────────────────────────────
-\subsection{APEX: Compression-Focused}
+% ── compression-focused ──────────────────────────────────────────────────────
+\subsection{compression-focused: Best Ratio}
 \label{sec:compression}
 
 \subsubsection*{Two-Tier Architecture}
-APEX separates orchestration from compression. The outer \texttt{compress}
+compression-focused separates orchestration from compression. The outer \texttt{compress}
 binary runs the inner \texttt{range\_compress} engine eight times with block
 sizes $\{250, 300, 400, 500, 750, 1000, 1500, 2000\}$ pixels in parallel,
 retains the smallest result, and wraps it with a 5-byte \texttt{APX2} magic
@@ -141,7 +141,7 @@ pair inverts the process. This exhaustive search over block sizes incurs extra
 compression time but requires no tuning per image.
 
 \subsubsection*{Predictor Competition}
-For each block, APEX evaluates ten candidate predictors:
+For each block, compression-focused evaluates ten candidate predictors:
 
 \begin{description}[leftmargin=2em, labelindent=0em]
   \item[Mode~0 (raw)] No prediction; symbols are raw pixel values.
@@ -187,7 +187,7 @@ stored. Each block header records the chosen \texttt{mode} (1\,B) and
 and model layout without side information.
 
 \subsubsection*{Entropy Coding: Adaptive Range Coder}
-APEX uses an LZMA-style range coder with a 32-bit range register and a
+compression-focused uses an LZMA-style range coder with a 32-bit range register and a
 64-bit low accumulator. Carry propagation is handled by a cache/pending
 chain: bytes whose top nibble is \texttt{0xFF} are held until a carry either
 flushes them as \texttt{0x00} or confirms them as \texttt{0xFF}.
