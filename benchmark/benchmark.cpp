@@ -114,13 +114,13 @@ static std::vector<Compressor> make_compressors(const std::string& /*tmp*/) {
         { "zstd-19", "zstd -19 -q -f {src} -o {dst}", "zstd -dq -f {src} -o {dst}", ".zst" },
 
         // --- our compressors ---
-        { "rais",    "../rais/compress {src} {dst} 2>/dev/null",   "../rais/decompress {src} {dst}", ".rais" },
+        { "rais",    "../rais/compress {rows} {cols} {src} {dst} 2>/dev/null",   "../rais/decompress {src} {dst}", ".rais" },
         { "astra",   "../astra/compress {src} {dst} 2>/dev/null",  "../astra/decompress {src} {dst}", ".astr" },
         { "helix",   "../helix/compress {src} {dst} 2>/dev/null",  "../helix/decompress {src} {dst}", ".hlx" },
         { "hais",    "../hais/compress 1500 1500 {src} {dst} 2>/dev/null",   "../hais/decompress {src} {dst}", ".hais" },
-        { "prism",   "../prism/compress {src} {dst} 2>/dev/null",  "../prism/decompress {src} {dst}", ".prism" },
-        { "prism-block", "../prism_block/compress 1500 1500 {src} {dst} 2>/dev/null", "../prism_block/decompress {src} {dst}", ".prismb" },
-        { "hais2", "../hais2/compress {src} {dst} 2>/dev/null", "../hais2/decompress {src} {dst}", ".hais2" },
+        { "prism",   "../prism/compress {rows} {cols} {src} {dst} 2>/dev/null",  "../prism/decompress {src} {dst}", ".prism" },
+        { "prism-block", "../prism_block/compress {rows} {cols} {src} {dst} 2>/dev/null", "../prism_block/decompress {src} {dst}", ".prismb" },
+        { "hais2", "../hais2/compress {rows} {cols} {src} {dst} 2>/dev/null", "../hais2/decompress {src} {dst}", ".hais2" },
         { "apex",    "../apex/compress {src} {dst} 2>/dev/null",   "../apex/decompress {src} {dst}", ".apex" },
     };
 }
@@ -143,6 +143,8 @@ static std::string build_compress_cmd(const Compressor& c,
                                       const std::string& src,
                                       const std::string& dst) {
     std::string cmd = c.compress_cmd;
+    cmd = sreplace(cmd, "{rows}", std::to_string(HEIGHT));
+    cmd = sreplace(cmd, "{cols}", std::to_string(WIDTH));
     cmd = sreplace(cmd, "{src}", src);
     cmd = sreplace(cmd, "{dst}", dst);
     return cmd;
