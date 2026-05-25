@@ -231,7 +231,7 @@ static uint64_t read_u64le(FILE* f) {
 // Compress
 // ---------------------------------------------------------------------------
 
-static int compress(const char* in_path, const char* out_path) {
+static int compress(int height, int width, const char* in_path, const char* out_path) {
     FILE* fin = fopen(in_path, "rb");
     if (!fin) { fprintf(stderr, "Cannot open input: %s\n", in_path); return 1; }
 
@@ -239,12 +239,10 @@ static int compress(const char* in_path, const char* out_path) {
     long fsize = ftell(fin);
     rewind(fin);
 
-    int width  = WIDTH_DEFAULT;
-    int height = HEIGHT_DEFAULT;
-    int npix   = width * height;
+    int npix = width * height;
 
     if (fsize != (long)npix * 2) {
-        fprintf(stderr, "Unexpected file size %ld (expected %d)\n", fsize, npix * 2);
+        fprintf(stderr, "File size mismatch: got %ld, expected %ld\n", fsize, (long)npix * 2);
         fclose(fin);
         return 1;
     }
@@ -426,9 +424,12 @@ static int decompress(const char* in_path, const char* out_path) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <input> <output>\n", argv[0]);
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <n_rows> <n_cols> <input> <output>\n", argv[0]);
         return 1;
     }
-    return compress(argv[1], argv[2]);
+    int H = std::atoi(argv[1]);
+    int W = std::atoi(argv[2]);
+    if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); return 1; }
+    return compress(H, W, argv[3], argv[4]);
 }

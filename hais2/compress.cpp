@@ -141,18 +141,6 @@ static BlockResult compress_block(const std::vector<uint16_t>& image,
 // Tries square root first, then common widths, then 1×npix fallback.
 // ---------------------------------------------------------------------------
 
-static bool infer_dims(long fsize, int& W, int& H) {
-    if (fsize <= 0 || fsize % 2 != 0) return false;
-    long npix = fsize / 2;
-    long sq   = (long)std::sqrt((double)npix);
-    if (sq * sq == npix) { W = H = (int)sq; return true; }
-    for (int w : {1500, 2048, 4096, 3000, 2000, 1920, 1024, 512, 256}) {
-        if (npix % w == 0) { W = w; H = (int)(npix / w); return true; }
-    }
-    W = (int)npix; H = 1;
-    return true;
-}
-
 // ---------------------------------------------------------------------------
 // Choose block size: largest BS ≤ 512 that divides both W and H exactly,
 // yielding at least 4 blocks. Falls back to 256 (with partial blocks).
@@ -172,29 +160,22 @@ static int choose_block_size(int W, int H) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[]) {
-    if (argc < 3 || argc == 4 || argc > 5) {
-        fprintf(stderr, "Usage: %s <input> <output.hais> [width height]\n", argv[0]);
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <n_rows> <n_cols> <input> <output.hais>\n", argv[0]);
         return 1;
     }
 
-    // Read input.
-    FILE* fin = fopen(argv[1], "rb");
-    if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[1]); return 1; }
+    int H = std::atoi(argv[1]);
+    int W = std::atoi(argv[2]);
+    if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); return 1; }
+
+    FILE* fin = fopen(argv[3], "rb");
+    if (!fin) { fprintf(stderr, "Cannot open %s\n", argv[3]); return 1; }
     fseek(fin, 0, SEEK_END); long fsize = ftell(fin); rewind(fin);
 
-    int W, H;
-    if (argc == 5) {
-        W = std::atoi(argv[3]); H = std::atoi(argv[4]);
-        if (W <= 0 || H <= 0) { fprintf(stderr, "Invalid dimensions\n"); fclose(fin); return 1; }
-        if (fsize != (long)W * H * 2) {
-            fprintf(stderr, "File size mismatch: got %ld, expected %d\n", fsize, W * H * 2);
-            fclose(fin); return 1;
-        }
-    } else {
-        if (!infer_dims(fsize, W, H)) {
-            fprintf(stderr, "Cannot infer dimensions from file size %ld\n", fsize);
-            fclose(fin); return 1;
-        }
+    if (fsize != (long)W * H * 2) {
+        fprintf(stderr, "File size mismatch: got %ld, expected %ld\n", fsize, (long)W * H * 2);
+        fclose(fin); return 1;
     }
 
     std::vector<uint16_t> image(W * H);
@@ -230,8 +211,8 @@ int main(int argc, char* argv[]) {
     for (auto& t : pool) t.join();
 
     // Write output.
-    FILE* fout = fopen(argv[2], "wb");
-    if (!fout) { fprintf(stderr, "Cannot open %s\n", argv[2]); return 1; }
+    FILE* fout = fopen(argv[4], "wb");
+    if (!fout) { fprintf(stderr, "Cannot open %s\n", argv[4]); return 1; }
 
     fwrite(MAGIC, 1, 4, fout);
     write_u32le(fout, (uint32_t)W);
@@ -250,7 +231,7 @@ int main(int argc, char* argv[]) {
     fclose(fout);
 
     long in_bytes  = (long)W * H * 2;
-    FILE* ft = fopen(argv[2], "rb"); fseek(ft, 0, SEEK_END); long out_bytes = ftell(ft); fclose(ft);
+    FILE* ft = fopen(argv[4], "rb"); fseek(ft, 0, SEEK_END); long out_bytes = ftell(ft); fclose(ft);
     fprintf(stderr, "Dimensions: %dx%d  blocks: %dx%d (%d total)\n",
             W, H, blocks_x, blocks_y, total);
     fprintf(stderr, "Modes: raw=%d avg=%d mean=%d ls4=%d ls5=%d ls6=%d  ctx=%d/%d\n",
