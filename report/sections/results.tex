@@ -5,23 +5,23 @@
 
 Table~\ref{tab:bpp} reports bits per byte for each of the eight benchmark
 images. All three domain-specific codecs outperform every generic compressor
-on every image. compression-focused achieves the best average ratio
+on every image. \cmpfocused{} achieves the best average ratio
 (3.37\,bpp), reducing average bpp by $0.21$ versus bzip2-9 and by $0.81$
-versus zstd-9. all-rounder follows closely ($+0.03$\,bpp over
-compression-focused) and speed-focused is $0.11$\,bpp above all-rounder,
+versus zstd-9. \allrounder{} follows closely ($+0.03$\,bpp over
+\cmpfocused{}) and \spdfocused{} is $0.11$\,bpp above \allrounder{},
 still beating every generic tool.
 
 The margin is consistent across image types. Image~F (science frame with
 bright point sources, $H_0 = 12.52$\,bpp) is the hardest for all codecs
 because its high raw entropy leaves little room for prediction; even so,
-compression-focused saves $0.41$\,bpp over bzip2-9 on that image alone.
+\cmpfocused{} saves $0.41$\,bpp over bzip2-9 on that image alone.
 Image~G (bias frame, $H_0 = 5.57$\,bpp) is the easiest: the near-constant
 DC pedestal is entirely captured by Mode~3 and compressed to 2.38\,bpp,
 $0.16$\,bpp below bzip2-9.
 
 \begin{table}[H]
 \centering
-\caption{Compression ratio (bpp) per image. Lower is better.}
+\caption{Compression ratio (bpp) per image}
 \label{tab:bpp}
 \scriptsize
 \begin{tabular}{lcccccc}
@@ -47,10 +47,10 @@ H & 3.41 & 3.29 & 3.25 & 3.41 & 4.11 \\
 \subsection{Speed}
 
 Table~\ref{tab:speed} shows average per-image runtimes.
-speed-focused achieves 49\,ms total, only 22\,ms slower than zstd-1 but
-with $0.98$\,bpp better compression. all-rounder takes 96\,ms,
+\spdfocused{} achieves 49\,ms total, only 22\,ms slower than zstd-1 but
+with $0.98$\,bpp better compression. \allrounder{} takes 96\,ms,
 $4.5\times$ faster than bzip2-9 (432\,ms) at $0.18$\,bpp better ratio.
-compression-focused trades a slow compression pass (${\sim}6.2$\,s) for
+\cmpfocused{} trades a slow compression pass (${\sim}6.2$\,s) for
 the best ratio; decompression (${\sim}133$\,ms) is faster than bzip2-9.
 
 \begin{table}[H]
@@ -60,11 +60,11 @@ the best ratio; decompression (${\sim}133$\,ms) is faster than bzip2-9.
 \small
 \begin{tabular}{lrrrrr}
 \toprule
-Compressor           & Size (MB) & Compress & Decompress & Total & bpp  \\
+Compressor           & Size (MB) & Compress (ms) & Decompress (ms) & Total (ms) & bpp  \\
 \midrule
-speed-focused        & 1.97 &    23    &    26      &    49 & 3.51 \\
-all-rounder          & 1.91 &    56    &    40      &    96 & 3.40 \\
-compression-focused  & 1.89 &  6169    &   133      &  6302 & 3.37 \\
+\spdfocused{}        & 1.97 &    23    &    26      &    49 & 3.51 \\
+\allrounder{}          & 1.91 &    56    &    40      &    96 & 3.40 \\
+\cmpfocused{}  & 1.89 &  6169    &   133      &  6302 & 3.37 \\
 \midrule
 bzip2-9              & 2.01 &   273    &   159      &   432 & 3.58 \\
 xz-6                 & 2.07 &  1650    &   102      &  1752 & 3.68 \\

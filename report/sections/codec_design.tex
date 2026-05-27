@@ -9,11 +9,11 @@ Zigzag maps small-magnitude residuals (the common case after a
 good prediction) to small unsigned integers, concentrating the symbol
 distribution near zero regardless of sign.
 
-% ── speed-focused ───────────────────────────────────────────────────────────────
-\subsection{speed-focused}
+% ── \spdfocused{} ───────────────────────────────────────────────────────────────
+\subsection{\spdfocused{}}
 \label{sec:speed}
 
-The design of speed-focused centres on one principle: every horizontal strip of
+The design of \spdfocused{} centres on one principle: every horizontal strip of
 150 rows is entirely self-contained, so any number of strips can be compressed
 simultaneously without coordination. A shared \texttt{std::atomic<int>} counter
 distributes work to a thread pool via \texttt{fetch\_add}, achieving lock-free
@@ -22,7 +22,7 @@ load balancing with no mutex overhead.
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{figs/fast_diagram.png}
-  \caption{speed-focused pipeline. Each strip is processed independently by a
+  \caption{\spdfocused{} pipeline. Each strip is processed independently by a
   worker thread: GAP prediction, zigzag mapping, hi/lo byte split, and adaptive
   range coding with eight context models.}
   \label{fig:fast_flow}
@@ -57,19 +57,19 @@ with bin boundaries $\{0\},\{1\text{--}2\},\{3\text{--}8\},\{9\text{--}32\},
 Each model halves all counts when the running total reaches $2^{16}$, keeping
 the frequency estimates responsive to distribution shifts within a strip.
 
-% ── all-rounder ───────────────────────────────────────────────────────────────
-\subsection{all-rounder}
+% ── \allrounder{} ───────────────────────────────────────────────────────────────
+\subsection{\allrounder{}}
 \label{sec:balanced}
 
 \subsubsection*{Block Selection}
-all-rounder requires explicit $n\_rows$ and $n\_cols$ arguments, which are stored in
+\allrounder{} requires explicit $n\_rows$ and $n\_cols$ arguments, which are stored in
 the compressed header so the decoder needs no additional input.
 It then selects the largest block side $b\le512$ that divides both $W$ and $H$
 exactly and yields at least four blocks. For $1500\times1500$ this gives
 $b=500$, producing a $3\times3$ grid of nine blocks of 500$\times$500 pixels.
 
 \subsubsection*{Predictive Modes}
-For each block, all-rounder evaluates five candidate predictors and selects
+For each block, \allrounder{} evaluates five candidate predictors and selects
 the one with the lowest estimated coding cost. \textbf{Mode~0 (raw)} applies
 no prediction and codes pixel values directly; it wins only on blocks where
 spatial correlation has been destroyed by strong read-noise. \textbf{Mode~1
@@ -117,7 +117,7 @@ $\text{nnz}\times5$\,B symbol--frequency pairs); or \emph{dense}
 \subsubsection*{Context FSE}
 Because the high byte of a small residual is almost always zero, the lo8
 distribution differs substantially depending on whether $\mathrm{hi}=0$.
-When the fraction of zero high bytes falls between 2\% and 98\%, all-rounder
+When the fraction of zero high bytes falls between 2\% and 98\%, \allrounder{}
 builds two conditional lo8 streams: \texttt{lo\_zero}
 (pixels with $\mathrm{hi}=0$) and \texttt{lo\_nonzero}, and uses the
 three-stream layout only if its compressed size is strictly smaller than the
@@ -129,11 +129,11 @@ Blocks are dispatched to a thread pool via a single
 \texttt{std::atomic<int>} counter with \texttt{fetch\_add}, writing results
 into pre-allocated per-block slots with no mutex required.
 
-% ── compression-focused ──────────────────────────────────────────────────────
-\subsection{compression-focused}
+% ── \cmpfocused{} ──────────────────────────────────────────────────────
+\subsection{\cmpfocused{}}
 \label{sec:compression}
 
-compression-focused separates orchestration from compression. The outer \texttt{compress}
+\cmpfocused{} separates orchestration from compression. The outer \texttt{compress}
 binary runs the inner \texttt{range\_compress} engine seven times with block
 sizes $\{250, 300, 400, 500, 750, 1000, 1500\}$ pixels in parallel,
 retains the smallest result, and wraps it with a 5-byte magic
@@ -146,7 +146,7 @@ Figure~\ref{fig:compression_flow} summarises the full pipeline.
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{figs/compression_focused_diagram.png}
-  \caption{compression-focused pipeline. The outer search runs \texttt{range\_compress}
+  \caption{\cmpfocused{} pipeline. The outer search runs \texttt{range\_compress}
   seven times in parallel (one per block size) and retains the smallest output.
   Inside each run, every block is compressed under all $10 \times 6 = 60$
   predictor/context combinations and the best is stored in the block header.}
@@ -154,9 +154,9 @@ Figure~\ref{fig:compression_flow} summarises the full pipeline.
 \end{figure}
 
 \subsubsection*{Predictor Competition}
-compression-focused evaluates ten predictors per block, spanning the full
+\cmpfocused{} evaluates ten predictors per block, spanning the full
 range from non-predictive to highly adaptive. Modes~0, 1, 3, GAP, and MED
-cover the same ground as all-rounder's five modes (raw, three-neighbour
+cover the same ground as \allrounder{}'s five modes (raw, three-neighbour
 average, global mean, gradient-adjusted, and JPEG-LS median), providing a
 strong baseline across all image types. The five OLS predictors extend the
 context progressively: LS-4 uses $(W,N,NW,1)$ with 4 weights (16\,B); LS-5
@@ -190,7 +190,7 @@ stored. Each block header records the chosen \texttt{mode} (1\,B) and
 and model layout without side information.
 
 \subsubsection*{Entropy Coding: Adaptive Range Coder}
-compression-focused uses an LZMA-style range coder with a 32-bit range register and a
+\cmpfocused{} uses an LZMA-style range coder with a 32-bit range register and a
 64-bit low accumulator. Carry propagation is handled by a cache/pending
 chain: bytes whose top nibble is \texttt{0xFF} are held until a carry either
 flushes them as \texttt{0x00} or confirms them as \texttt{0xFF}.

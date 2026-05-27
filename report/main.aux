@@ -12,17 +12,17 @@
 \citation{collet2013fse}
 \@writefile{toc}{\contentsline {section}{\numberline {2}Codec Design}{2}{section.2}\protected@file@percent }
 \newlabel{sec:codecs}{{2}{2}{Codec Design}{section.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}speed-focused}{2}{subsection.2.1}\protected@file@percent }
-\newlabel{sec:speed}{{2.1}{2}{speed-focused}{subsection.2.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces speed-focused pipeline. Each strip is processed independently by a worker thread: GAP prediction, zigzag mapping, hi/lo byte split, and adaptive range coding with eight context models.}}{2}{figure.caption.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}\textbf  {\textit  {speed-focused}}{}}{2}{subsection.2.1}\protected@file@percent }
+\newlabel{sec:speed}{{2.1}{2}{\spdfocused {}}{subsection.2.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textbf  {\textit  {speed-focused}}{} pipeline. Each strip is processed independently by a worker thread: GAP prediction, zigzag mapping, hi/lo byte split, and adaptive range coding with eight context models.}}{2}{figure.caption.1}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{fig:fast_flow}{{1}{2}{speed-focused pipeline. Each strip is processed independently by a worker thread: GAP prediction, zigzag mapping, hi/lo byte split, and adaptive range coding with eight context models}{figure.caption.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}all-rounder}{2}{subsection.2.2}\protected@file@percent }
-\newlabel{sec:balanced}{{2.2}{2}{all-rounder}{subsection.2.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}compression-focused}{3}{subsection.2.3}\protected@file@percent }
-\newlabel{sec:compression}{{2.3}{3}{compression-focused}{subsection.2.3}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces compression-focused pipeline. The outer search runs \texttt  {range\_compress} seven times in parallel (one per block size) and retains the smallest output. Inside each run, every block is compressed under all $10 \times 6 = 60$ predictor/context combinations and the best is stored in the block header.}}{3}{figure.caption.7}\protected@file@percent }
-\newlabel{fig:compression_flow}{{2}{3}{compression-focused pipeline. The outer search runs \texttt {range\_compress} seven times in parallel (one per block size) and retains the smallest output. Inside each run, every block is compressed under all $10 \times 6 = 60$ predictor/context combinations and the best is stored in the block header}{figure.caption.7}{}}
+\newlabel{fig:fast_flow}{{1}{2}{\spdfocused {} pipeline. Each strip is processed independently by a worker thread: GAP prediction, zigzag mapping, hi/lo byte split, and adaptive range coding with eight context models}{figure.caption.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}\textbf  {\textit  {all-rounder}}{}}{2}{subsection.2.2}\protected@file@percent }
+\newlabel{sec:balanced}{{2.2}{2}{\allrounder {}}{subsection.2.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}\textbf  {\textit  {compression-focused}}{}}{3}{subsection.2.3}\protected@file@percent }
+\newlabel{sec:compression}{{2.3}{3}{\cmpfocused {}}{subsection.2.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces \textbf  {\textit  {compression-focused}}{} pipeline. The outer search runs \texttt  {range\_compress} seven times in parallel (one per block size) and retains the smallest output. Inside each run, every block is compressed under all $10 \times 6 = 60$ predictor/context combinations and the best is stored in the block header.}}{3}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:compression_flow}{{2}{3}{\cmpfocused {} pipeline. The outer search runs \texttt {range\_compress} seven times in parallel (one per block size) and retains the smallest output. Inside each run, every block is compressed under all $10 \times 6 = 60$ predictor/context combinations and the best is stored in the block header}{figure.caption.7}{}}
 \citation{quintas2026}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Experimental Setup}{4}{section.3}\protected@file@percent }
 \newlabel{sec:setup}{{3}{4}{Experimental Setup}{section.3}{}}
@@ -35,15 +35,13 @@
 \@writefile{toc}{\contentsline {section}{\numberline {4}Results}{5}{section.4}\protected@file@percent }
 \newlabel{sec:results}{{4}{5}{Results}{section.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Compression Ratio}{5}{subsection.4.1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Compression ratio (bpp) per image. Lower is better.}}{5}{table.caption.12}\protected@file@percent }
-\newlabel{tab:bpp}{{2}{5}{Compression ratio (bpp) per image. Lower is better}{table.caption.12}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Compression ratio (bpp) per image}}{5}{table.caption.12}\protected@file@percent }
+\newlabel{tab:bpp}{{2}{5}{Compression ratio (bpp) per image}{table.caption.12}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Speed}{5}{subsection.4.2}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Average per-image compressed size, runtimes (ms), and bpp. Original file: 4.5\,MB.}}{5}{table.caption.13}\protected@file@percent }
 \newlabel{tab:speed}{{3}{5}{Average per-image compressed size, runtimes (ms), and bpp. Original file: 4.5\,MB}{table.caption.13}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Discussion and Conclusion}{5}{section.5}\protected@file@percent }
 \newlabel{sec:discussion}{{5}{5}{Discussion and Conclusion}{section.5}{}}
-\@writefile{toc}{\contentsline {paragraph}{Why domain-specific codecs win.}{5}{section*.14}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Role of the predictor.}{5}{section*.15}\protected@file@percent }
 \citation{quintas2026}
 \bibcite{shannon1948}{1}
 \bibcite{collet2013fse}{2}
@@ -51,9 +49,6 @@
 \bibcite{fits}{4}
 \bibcite{quintas2026}{5}
 \bibcite{dryad}{6}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces all-rounder mode selection per image (blocks out of 9).}}{6}{table.caption.16}\protected@file@percent }
-\newlabel{tab:modes}{{4}{6}{all-rounder mode selection per image (blocks out of 9)}{table.caption.16}{}}
-\@writefile{toc}{\contentsline {paragraph}{Entropy coding and search.}{6}{section*.17}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Generalisation to external data.}{6}{section*.18}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Conclusion.}{6}{section*.19}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces \textbf  {\textit  {all-rounder}}{} mode selection per image (blocks out of 9).}}{6}{table.caption.14}\protected@file@percent }
+\newlabel{tab:modes}{{4}{6}{\allrounder {} mode selection per image (blocks out of 9)}{table.caption.14}{}}
 \gdef \@abspage@last{6}
